@@ -224,13 +224,15 @@ last pod is replaced. Through the public load balancers it loads `/api/healthz` 
 Every 3 seconds it runs `git ls-remote` over HTTP and SSH, pushes a commit over SSH, and creates
 an issue through the API. Any error or timeout counts as a failure.
 
-| Upgrade | PR | Checks | Failed | Merge to rollout done |
-| --- | --- | --- | --- | --- |
-| Minor, 1.26.3 to 1.27.3 | [gitea-deployment#9](https://github.com/basenote-dev/gitea-deployment/pull/9) | 793 | 0 | 3 min 16 s |
-| Major, 1.27.3 to 28.2.0 | [gitea-deployment#10](https://github.com/basenote-dev/gitea-deployment/pull/10) | 834 | 0 | 3 min 37 s |
+These runs were on a fresh clone of the template, in a new repo, with every fix above in place.
 
-A real repo (spf13/cobra, 1,106 commits) cloned the same before and after. The number of issues
-stored matched the number of successful writes exactly.
+| Upgrade | Checks | Failed | Merge to rollout done |
+| --- | --- | --- | --- |
+| Minor, 1.26.3 to 1.27.3 | 829 | 0 | 3 min 56 s |
+| Major, 1.27.3 to 28.2.0 | 866 | 0 | 3 min 55 s |
+
+A real repo (spf13/cobra, 1,106 commits) cloned the same before and after. 40 logins in a row
+all worked. After both upgrades, no Gitea container or init container had restarted.
 
 The check samples every 1 to 3 seconds. A gap shorter than that could slip between two checks.
 
