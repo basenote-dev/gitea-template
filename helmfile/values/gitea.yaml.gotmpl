@@ -48,7 +48,8 @@ podSecurityContext:
 # the same file at once: a pod can read it half-written and start in install mode, and install
 # mode then overwrites the shared file. Mounting a per-pod emptyDir over /data/gitea/conf gives
 # each pod its own app.ini, built fresh from these values and the secrets at every start. The
-# keys Gitea would otherwise generate per pod come from gitea/app-ini-keys instead.
+# keys Gitea would otherwise generate per pod come from gitea/app-ini-keys instead. The first init
+# container (init-directories) doesn't get this mount; see the patch in helmfile.yaml.gotmpl.
 extraVolumes:
   - name: ssh-host-key
     secret:
