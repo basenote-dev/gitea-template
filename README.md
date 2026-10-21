@@ -74,6 +74,9 @@ Manager.
 To roll back, don't lower the version (Gitea can't run on tables a newer version changed).
 Restore the database with RDS point-in-time recovery to a minute before the upgrade.
 
+Why it is built this way (two pods, EFS, Valkey, the shared SSH key) is in
+[adrs/0001-zero-downtime-gitea.md](adrs/0001-zero-downtime-gitea.md).
+
 ## Watch a zero-downtime upgrade
 
 Run this from your laptop, with the same AWS credentials, while a rollout happens:
@@ -96,7 +99,30 @@ Start it, merge an upgrade PR, and watch the counts while the pods roll. Ctrl-C 
 totals and the time of any failure; every result is kept in
 `zero-downtime-healthcheck-<time>.log`.
 
-## Known limitations
+## Running cost
+
+About $0.60 an hour (about $14 a day) while the cluster is up, at us-west-2 on-demand list
+prices. Tear it down when you're not using it; the bootstrap that stays behind costs about $3 a
+month (the state key and the secrets).
+
+| Piece | Per hour |
+| --- | --- |
+| RDS PostgreSQL `db.m7g.large`, single AZ, 20 GB | ~$0.17 |
+| ElastiCache Valkey `cache.m7g.large`, 1 node | ~$0.13 |
+| EKS control plane | $0.10 |
+| EC2 nodes run by Auto Mode (usually 1 to 2 `c6a.large`) plus the Auto Mode fee | ~$0.09 to $0.17 |
+| NAT gateway | ~$0.05 |
+| ALB and NLB | ~$0.05 |
+| EFS, CloudWatch logs, data transfer | a few cents |
+
+Multi-AZ RDS would add about $0.17 an hour.
+
+## Demo limitations
+
+This demo is about one thing: upgrading Gitea without downtime. Everything Gitea needs for
+that runs in two copies or lives outside the pods. The pieces below are kept single and simple
+to save cost; none of them is touched by a Gitea upgrade, and each has a known fix for
+production.
 
 - The database is in one AZ. AWS maintenance or a failure takes it offline for a few minutes,
   and Gitea fails requests until it is back. Gitea upgrades don't touch it. Multi-AZ
