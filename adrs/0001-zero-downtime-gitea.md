@@ -77,9 +77,8 @@ so users' `known_hosts` keep working.
    merging it starts the deploy.
 2. Kubernetes starts one new pod with the new version (`maxSurge: 1`). Both old pods keep
    serving.
-3. On a minor or major upgrade, the new pod updates the database tables when it starts. The old
-   pods keep serving while it does; in both upgrade tests they kept working on the updated
-   tables until they were replaced.
+3. On a minor or major upgrade, the new pod updates the database tables before Gitea starts
+   (see "The database during an upgrade" below). The old pods keep serving while it does.
 4. The load balancers (an ALB for web and git over HTTP, an NLB for SSH) send the new pod traffic
    only after it passes their health checks. Kubernetes waits for that too (readiness gates),
    so it doesn't count the pod as ready before users can reach it.
@@ -89,6 +88,27 @@ so users' `known_hosts` keep working.
    and a disruption budget that keeps at least 1 pod).
 
 From merge to finished rollout takes about 3.5 minutes.
+
+### The database during an upgrade
+
+A new Gitea version can change the database tables. The Gitea Helm chart handles that itself:
+every Gitea pod has an init container, `configure-gitea`, that runs `gitea migrate` before Gitea
+starts (`templates/gitea/init.yaml` in the chart). There is no separate job to run.
+
+- Only the first new pod changes the tables. With `maxSurge: 1` one new pod starts at a time, so
+  two pods never migrate at once; the second new pod's `gitea migrate` finds nothing to do.
+- Nothing can kill the pod halfway through. Kubernetes health probes only watch the main Gitea
+  container, not init containers, so a slow migration is left to finish.
+- A failed migration doesn't take Gitea down. The init container exits with an error and the new
+  pod never becomes ready. With `maxUnavailable: 0`, Kubernetes never stops an old pod until a
+  new one is ready, so both old pods keep serving. The deploy fails in CI and nobody using Gitea
+  notices.
+- A version set lower by mistake ends the same way: the new pod refuses to start on tables a
+  newer version changed, and the old pods keep serving.
+- The old pods keep working on the updated tables until they are replaced. That held in both
+  upgrade tests, 1.26 to 1.27 and 1.27 to 28.
+
+The database itself is never restarted or switched during an upgrade.
 
 The 60-second pause is there because the load balancers need time to notice a pod is leaving:
 the controller starts removing it about 15 seconds after Kubernetes asks the pod to stop, and the
