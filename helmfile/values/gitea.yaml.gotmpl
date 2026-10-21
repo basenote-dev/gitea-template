@@ -66,12 +66,14 @@ extraContainerVolumeMounts:
   - name: app-ini
     mountPath: /data/gitea/conf
 
-# Create Gitea's git home before Gitea starts. Gitea makes /data/home itself at startup, and two
-# pods starting together on the shared volume race on it: one fails with "mkdir /data/home: file
-# exists" and restarts (seen on a fresh install). `mkdir -p` in the init container doesn't fail
-# when the folder already exists.
+# Create every folder Gitea uses on the shared volume before Gitea starts. Gitea makes them itself
+# at startup, and two pods starting together on a fresh volume race: one fails with "mkdir
+# /data/<folder>: file exists" and restarts (seen for /data/home and /data/jwt). `mkdir -p` in the
+# init container doesn't fail when the folder already exists.
 initPreScript: |
-  mkdir -p /data/home
+  mkdir -p /data/home /data/jwt /data/attachments /data/avatars /data/lfs /data/packages \
+    /data/repo-archive /data/repo-avatars /data/actions_log /data/actions_artifacts \
+    /data/git/gitea-repositories
 
 containerSecurityContext:
   runAsNonRoot: true
@@ -196,6 +198,11 @@ gitea:
     security:
       MIN_PASSWORD_LENGTH: 12
       PASSWORD_COMPLEXITY: lower,upper,digit
+    oauth2:
+      # Sign OAuth2 tokens with JWT_SECRET, which every pod shares (gitea/app-ini-keys). The default
+      # (RS256) makes each pod generate a private key file in /data/jwt on first start, so two pods
+      # can race on it or end up signing with different keys.
+      JWT_SIGNING_ALGORITHM: HS256
     migrations:
       # Never let the repo-migration feature reach private networks (SSRF guard).
       ALLOW_LOCALNETWORKS: false
