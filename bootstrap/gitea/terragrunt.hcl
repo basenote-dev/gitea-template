@@ -1,7 +1,7 @@
 # The Gitea stack: the OpenTofu in aws/ plus everything inside the cluster (Helmfile, run from
 # the hooks below).
 #
-# Everything is one command, from bootstrap/, the same on a laptop and in CI:
+# One command from bootstrap/, the same on a laptop and in CI:
 #
 #   terragrunt run --all plan|apply|destroy
 #
@@ -35,7 +35,7 @@ locals {
     "--output", "text")) == "True"
   ])
 
-  # Writes the cluster to ~/.kube/config as context gitea-<account>. In CI the job's own role has
+  # Writes the cluster to ~/.kube/config as context gitea-sandbox. In CI the job's own role has
   # an EKS access entry (github-plan view, github-apply admin). On a laptop the caller is any
   # admin in the account, so kubectl assumes platform-eks-admin (created by bootstrap, trusted by
   # the account) instead of needing its own access entry.

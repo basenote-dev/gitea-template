@@ -279,8 +279,8 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 ################################################################################
 # External Secrets Pod Identity
 ################################################################################
-# External Secrets Operator (a Helmfile release) copies the four gitea/* secrets into Kubernetes
-# Secrets. Its role can read exactly those, nothing else. A custom policy instead of the
+# External Secrets Operator (a Helmfile release) copies the five gitea/* secrets into Kubernetes
+# Secrets. Its role can read exactly those. A custom policy instead of the
 # module's attach_external_secrets_policy, which also allows ListSecrets on every secret and
 # kms:Decrypt on every key.
 

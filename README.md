@@ -1,4 +1,4 @@
-# melange-gitea-deployment
+# gitea-template
 
 Gitea on AWS: EKS Auto Mode, RDS PostgreSQL, ElastiCache Valkey and EFS, deployed with
 OpenTofu, Terragrunt and Helmfile.
@@ -19,7 +19,7 @@ modules/     vendored terraform-aws-modules
 ## Method 1: everything from your laptop
 
 ```sh
-git clone <this repo> && cd melange-gitea-deployment/bootstrap
+git clone https://github.com/basenote-dev/gitea-template.git && cd gitea-template/bootstrap
 mise install
 terragrunt run --all apply --backend-bootstrap
 ```
@@ -42,12 +42,18 @@ mise install
 GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
 ```
 
-1. This runs only `state/`, and with `GITHUB_TOKEN` it also sets up GitHub: the OIDC trust,
-   environments `sandbox-plan` (read-only role, any branch) and `sandbox-apply` (admin role,
-   `main` only). No AWS keys are stored in GitHub.
+1. This runs only `state/`. With `GITHUB_TOKEN` set it also sets up GitHub: the OIDC trust,
+   the environments `sandbox-plan` (read-only role, any branch) and `sandbox-apply` (admin role,
+   `main` only), and the repository variable `BOOTSTRAPPED`. No AWS keys are stored in GitHub.
 2. Start the first deploy: Actions -> terragrunt -> Run workflow -> `apply`, or push to `main`.
-3. From then on every pull request gets a plan comment (OpenTofu plan and Helm diff), and every
+3. After that, every pull request gets a plan comment (OpenTofu plan and Helm diff), and every
    merge to `main` applies it.
+
+The workflow does nothing in a repository without `BOOTSTRAPPED` (a fresh clone, or this
+template), so pushing before the bootstrap is harmless. Deleting the variable turns CI off
+again; running the bootstrap sets it back.
+
+Tear down with Actions -> terragrunt -> Run workflow -> `destroy` (keeps `state/`).
 
 ## Watch a zero-downtime upgrade
 
@@ -57,9 +63,9 @@ Run this from your laptop, with the same AWS credentials, while a rollout happen
 scripts/zero-downtime-upgrade-healthcheck.sh
 ```
 
-No setup: it finds Gitea's load balancers, logs in as the admin (password from Secrets
-Manager), creates a test repository and a temporary SSH key. Then five loops hit Gitea every
-1-3 seconds: `/api/healthz`, `git ls-remote` over HTTP and over SSH, a commit pushed over SSH,
+It needs only the AWS CLI, git and curl. It finds Gitea's load balancers by their tags, logs in
+as the admin with the password from Secrets Manager, and creates a test repository and a
+temporary SSH key. Five loops then hit Gitea every 1-3 seconds: `/api/healthz`, `git ls-remote` over HTTP and over SSH, a commit pushed over SSH,
 and an issue created through the API. Every 5 seconds it prints one line with each check's
 latest result and its ok/fail count:
 

@@ -2,8 +2,8 @@
 #
 #   terragrunt run --all plan|apply|destroy
 #
-# Terragrunt runs the gitea/ unit (OpenTofu in aws/, then Helmfile from its hooks). The state/
-# unit is skipped in CI (a human runs it once).
+# Terragrunt runs the gitea/ unit (OpenTofu in aws/, then Helmfile from its hooks). CI skips the
+# state/ unit; a person runs it once from a laptop.
 #
 #   pull request          -> plan (tofu plan + helmfile diff), posted as a PR comment
 #   merge to main         -> apply
@@ -11,12 +11,10 @@
 #
 # Two GitHub environments, each with variable AWS_ROLE_ARN pointing at an OIDC role made by
 # bootstrap/state:
-#   <account>-plan  (any branch) -> github-plan  (read-only)
-#   <account>-apply (main only)  -> github-apply (AdministratorAccess)
+#   sandbox-plan  (any branch) -> github-plan  (read-only)
+#   sandbox-apply (main only)  -> github-apply (AdministratorAccess)
 # Each IAM role trusts only its own environment, so a branch can never get write access. There
 # are no static AWS keys anywhere.
-#
-# Sandbox plans on every PR and applies on merge.
 name: terragrunt
 
 on:
@@ -44,7 +42,7 @@ env:
   MISE_YES: "1"
 
 # Every job waits for bootstrap/state, which sets the repo variable BOOTSTRAPPED. Until then (a
-# fresh fork, or this source repo) pushes and pull requests run nothing.
+# fresh clone, or the template) pushes and pull requests run nothing.
 jobs:
   plan:
     if: >-
@@ -98,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment: sandbox-apply
-    # One apply/destroy per account at a time, never cancelled half-way.
+    # One apply or destroy at a time, never cancelled half-way.
     concurrency:
       group: deploy-sandbox
       cancel-in-progress: false

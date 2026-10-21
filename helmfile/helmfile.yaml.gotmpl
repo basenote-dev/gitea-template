@@ -6,9 +6,9 @@
 #   helmfile -e sandbox diff     # what would change ("helm plan")
 #   helmfile -e sandbox apply    # diff, then upgrade only what changed
 #
-# One Helmfile environment per AWS account. Each reads its sizing from env/<account>.yaml and
-# its AWS values (endpoints, secret names, Gitea version) straight from the account stack's
-# `helmfile_values` output (values/tofu-outputs.yaml.gotmpl).
+# One Helmfile environment, sandbox. It reads its sizing from env/sandbox.yaml and its AWS values
+# (endpoints, secret names, Gitea version) straight from the stack's `helmfile_values` output
+# (values/tofu-outputs.yaml.gotmpl).
 #
 # Charts and images are pinned here and pulled from upstream. Every image uses
 # imagePullPolicy IfNotPresent: tags never move, so a node reuses what it already pulled.
@@ -45,7 +45,7 @@ repositories:
     url: https://charts.external-secrets.io
 
 releases:
-  # Node capacity for everything below (on-demand Graviton, sized per account). Must exist first.
+  # Node capacity for everything below (on-demand Graviton, sized in env/sandbox.yaml). Must exist first.
   - name: node-pools
     namespace: default
     chart: ./charts/node-pools
@@ -75,7 +75,7 @@ releases:
           image: {{ $eso | toJson }}
 
   # Cluster-scoped objects for Gitea: its namespace (with Pod Security labels), the EFS
-  # PersistentVolume and the account's ALB IngressClass. Installed from "default" because a chart
+  # PersistentVolume and the ALB IngressClass. Installed from "default" because a chart
   # can't create the namespace it is installed into.
   - name: gitea-cluster
     namespace: default
@@ -124,8 +124,8 @@ releases:
           pullPolicy: IfNotPresent
     # The chart has no `lifecycle` setting. A preStop pause keeps a stopping pod serving while the
     # ALB/NLB stop sending it new connections: the controller only starts deregistering ~15s after
-    # the pod is told to stop, and the NLB takes a while longer, so 15s dropped an SSH connection
-    # in the first upgrade test. Gitea then drains open connections (GRACEFUL_HAMMER_TIME).
+    # the pod is told to stop, and the NLB takes a while longer; a 15s pause dropped an SSH
+    # connection in testing. Gitea then drains open connections (GRACEFUL_HAMMER_TIME).
     # (Helmfile yoinks the rendered chart and patches it with kustomize.)
     strategicMergePatches:
       - apiVersion: apps/v1
