@@ -49,7 +49,7 @@ GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-boo
 `--backend-bootstrap` creates the state bucket before OpenTofu starts, so this unit's own state
 goes there too. You can run it again at any time; it only changes what drifted.
 
-Then start the first deploy (Actions -> Gitea deploy -> Run workflow -> `apply`) and delete any
+Then start the first deploy (Actions -> Gitea Deploy -> Run workflow -> `apply`) and delete any
 long-lived IAM user or access key you used for the bootstrap.
 
 ## No OpenTofu state encryption for this unit
