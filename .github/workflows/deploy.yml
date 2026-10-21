@@ -15,7 +15,12 @@
 #   sandbox-apply (main only)  -> github-apply (AdministratorAccess)
 # Each IAM role trusts only its own environment, so a branch can never get write access. There
 # are no static AWS keys anywhere.
-name: terragrunt
+name: Gitea deploy
+# What each run shows in the Actions list: the PR or commit it is for, or who started it.
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('Plan · #{0} {1}', github.event.pull_request.number, github.event.pull_request.title)
+  || github.event_name == 'push' && format('Deploy · {0}', github.event.head_commit.message)
+  || format('Manual {0} · started by {1}', inputs.action, github.actor) }}
 
 on:
   pull_request:
@@ -25,7 +30,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: What to run against the whole account
+        description: What to run
         type: choice
         options: [plan, apply, destroy]
         default: plan
@@ -45,6 +50,7 @@ env:
 # fresh clone, or the template) pushes and pull requests run nothing.
 jobs:
   plan:
+    name: Plan
     if: >-
       vars.BOOTSTRAPPED == 'true' && (
         github.event_name == 'pull_request' ||
@@ -72,13 +78,13 @@ jobs:
           install: true
           cache: true
 
-      - name: AWS credentials (OIDC)
+      - name: Log in to AWS as github-plan (read-only)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: terragrunt run --all plan
+      - name: Plan (OpenTofu plan and Helm diff)
         uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
         env:
           GITHUB_TOKEN: ${{ github.token }} # the action posts the comment with it
@@ -88,6 +94,7 @@ jobs:
           github_token: ${{ github.token }}
 
   apply:
+    name: Deploy
     if: >-
       vars.BOOTSTRAPPED == 'true' && (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -115,20 +122,20 @@ jobs:
           install: true
           cache: true
 
-      - name: AWS credentials (OIDC)
+      - name: Log in to AWS as github-apply
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-duration-seconds: 7200 # EKS and RDS creation can take over an hour
 
-      - name: terragrunt run --all apply
+      - name: Deploy (OpenTofu apply, then Helmfile)
         uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
         with:
           tg_command: run --all apply --working-dir bootstrap
           github_token: ${{ github.token }}
 
-      - name: Summary
+      - name: Show the Gitea URL
         run: |
           lb=$(kubectl --context gitea-sandbox --namespace gitea get ingress gitea --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
           {
@@ -138,6 +145,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   destroy:
+    name: Destroy
     if: vars.BOOTSTRAPPED == 'true' && github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -158,7 +166,7 @@ jobs:
           install: true
           cache: true
 
-      - name: AWS credentials (OIDC)
+      - name: Log in to AWS as github-apply
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
@@ -167,7 +175,7 @@ jobs:
 
       # The stack's hooks uninstall the Helm releases (waiting for the load balancers to go) before
       # OpenTofu destroys the stack. state/ is never destroyed.
-      - name: terragrunt run --all destroy
+      - name: Destroy (Helm releases, then OpenTofu)
         uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
         with:
           tg_command: run --all destroy --working-dir bootstrap
