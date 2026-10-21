@@ -21,7 +21,7 @@ output "helmfile_values" {
     vpc_id        = module.vpc.vpc_id
 
     # Data stores
-    rds_endpoint      = "${aws_db_proxy.this.endpoint}:5432" # the RDS Proxy, host:port
+    rds_endpoint      = module.rds.db_instance_endpoint # host:port
     valkey_endpoint   = "${aws_elasticache_replication_group.valkey.primary_endpoint_address}:${aws_elasticache_replication_group.valkey.port}"
     efs_volume_handle = "${module.efs.id}::${module.efs.access_points["gitea"].id}" # EFS CSI form: <fs>::<access point>
 
