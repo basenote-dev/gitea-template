@@ -103,6 +103,11 @@ releases:
     # ALB/NLB stop sending it new connections: the controller only starts deregistering ~15s after
     # the pod is told to stop, and the NLB takes a while longer; a 15s pause dropped an SSH
     # connection in testing. Gitea then drains open connections (GRACEFUL_HAMMER_TIME).
+    #
+    # init-directories runs first, without the per-pod app.ini volume, so it creates
+    # /data/gitea/conf on the shared volume itself (`mkdir -p`, race-safe). With the volume mounted
+    # there, the container runtime had to create that folder on EFS before the step started, and
+    # two pods doing it at once on a fresh volume failed with "no such file or directory".
     # (Helmfile yoinks the rendered chart and patches it with kustomize.)
     strategicMergePatches:
       - apiVersion: apps/v1
@@ -113,6 +118,11 @@ releases:
         spec:
           template:
             spec:
+              initContainers:
+                - name: init-directories
+                  volumeMounts:
+                    - mountPath: /data/gitea/conf
+                      $patch: delete
               containers:
                 - name: gitea
                   lifecycle:
