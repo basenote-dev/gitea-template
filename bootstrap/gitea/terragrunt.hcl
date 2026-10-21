@@ -8,8 +8,7 @@
 # run --all orders the units: state/ (laptop only), then this one. For this unit:
 #
 #   plan     tofu plan, then `helmfile diff` (skipped until the cluster exists)
-#   apply    tofu apply (which also snapshots RDS before a Gitea minor/major upgrade), then
-#            `helmfile apply`
+#   apply    tofu apply, then `helmfile apply`
 #   destroy  `helmfile destroy` first (removes the load balancers), then tofu destroy
 #
 # root.hcl generates the backend, the AWS provider (region, account guard, cost tags from

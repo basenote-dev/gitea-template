@@ -59,9 +59,9 @@ locals {
 
   # The Gitea version this account runs (docker.gitea.com/gitea:<version>-rootless).
   # Helmfile deploys it (helmfile_values.gitea_image_tag). Bump one step at a time:
-  #   patch (1.26.3 -> 1.26.4): plain rolling update, no snapshot.
-  #   minor/major (1.26 -> 1.27, 1.27 -> 28): RDS snapshot below, then a `gitea migrate` Job
-  #   before the pods roll (helmfile/charts/gitea-config). Downgrades are refused.
+  #   patch (1.26.3 -> 1.26.4): plain rolling update.
+  #   minor/major (1.26 -> 1.27, 1.27 -> 28): a `gitea migrate` Job runs before the pods roll
+  #   (helmfile/charts/gitea-config). Downgrades are refused.
   gitea_version = "1.26.3"
 
   # No burstable (t) classes: they run on CPU credits and slow to a crawl when the credits run
@@ -497,29 +497,4 @@ module "efs" {
   # Daily AWS Backup in the default backup plan (35-day retention).
   create_backup_policy = true
   enable_backup_policy = true
-}
-
-################################################################################
-# Gitea Upgrade Snapshot
-################################################################################
-# A manual RDS snapshot taken before Gitea moves to a new minor or major version, i.e. before its
-# schema migration. The identifier holds only major.minor of gitea_version, so a patch bump
-# (1.26.3 -> 1.26.4) changes nothing here, while 1.26 -> 1.27 replaces gitea-pre-1-26 with
-# gitea-pre-1-27. It is created during this apply, before the Helmfile hook runs the migration
-# Job, and the new one exists before the previous one is deleted. Rolling back a bad upgrade
-# means restoring this snapshot by hand: a plain version downgrade is refused (gitea-config).
-# The first apply snapshots the empty database.
-
-resource "aws_db_snapshot" "gitea_pre_upgrade" {
-  db_instance_identifier = module.rds.db_instance_identifier
-  db_snapshot_identifier = "${local.name}-pre-${join("-", slice(split(".", local.gitea_version), 0, 2))}"
-
-  lifecycle {
-    create_before_destroy = true
-
-    precondition {
-      condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", local.gitea_version))
-      error_message = "gitea_version must be a release version like 1.26.3, got ${local.gitea_version}."
-    }
-  }
 }
