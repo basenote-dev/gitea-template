@@ -99,7 +99,12 @@ Start it, merge an upgrade PR, and watch the counts while the pods roll. Ctrl-C 
 totals and the time of any failure; every result is kept in
 `zero-downtime-healthcheck-<time>.log`.
 
-## Known limitations
+## Demo limitations
+
+This demo is about one thing: upgrading Gitea without downtime. Everything Gitea needs for
+that runs in two copies or lives outside the pods. The pieces below are kept single and simple
+to save cost; none of them is touched by a Gitea upgrade, and each has a known fix for
+production.
 
 - The database is in one AZ. AWS maintenance or a failure takes it offline for a few minutes,
   and Gitea fails requests until it is back. Gitea upgrades don't touch it. Multi-AZ

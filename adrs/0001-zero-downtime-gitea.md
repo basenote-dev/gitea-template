@@ -10,7 +10,7 @@ lost push.
 
 It covers Gitea upgrades (patch, minor and major) and any other change that replaces the pods,
 like a config change. It does not cover AWS restarting the database or the cache; that is in
-"Known limits" below.
+"Demo limitations" below.
 
 ## Why this takes more than one pod
 
@@ -137,7 +137,12 @@ successful API writes exactly.
 The check samples every 1 to 3 seconds, so a gap shorter than that could pass between two
 checks.
 
-## Known limits
+## Demo limitations
+
+This demo is about one thing: upgrading Gitea without downtime. Everything Gitea needs for
+that runs in two copies or lives outside the pods. The pieces below are kept single and simple
+to save cost; none of them is touched by a Gitea upgrade, and each has a known fix for
+production.
 
 - The database runs in one AZ. When AWS patches it or the hardware fails, it is offline for a
   few minutes and Gitea fails requests until it is back. Upgrades never touch it. Multi-AZ RDS
