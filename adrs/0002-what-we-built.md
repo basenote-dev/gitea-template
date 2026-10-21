@@ -55,6 +55,8 @@ every piece we wrote or changed on top of that, so each one can be reviewed and 
 | `charts/gitea-config` (our chart) | SecretStore and ExternalSecrets (admin, app.ini sections, SSH key), the EFS claim | Gitea's secrets and storage, wired to AWS | Yes (shared keys, EFS claim) | No |
 | Gitea chart values | Every difference from the stock chart is in ADR 0001, "Where we differ from the stock Gitea chart" | | Most of them | See ADR 0001 |
 | `strategicMergePatches`: `preStop: sleep 60` | Adds the 60 s pause before a pod stops | The Gitea chart has no setting for it | Yes | No |
+| `strategicMergePatches`: no per-pod `app.ini` mount on `init-directories` | The first init step creates `/data/gitea/conf` on EFS itself | With the mount there, two pods on a fresh volume raced to create that folder (seen) | Fresh installs only | No |
+| `initPreScript` creating Gitea's folders, OAuth2 `HS256` | Gitea never creates a folder or key file on the shared volume at first start | Two pods starting together raced on `/data/home` and `/data/jwt` (seen) | Fresh installs only | No |
 
 ### Pipeline and tooling
 

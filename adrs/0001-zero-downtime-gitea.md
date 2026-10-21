@@ -237,9 +237,63 @@ Secrets.
 | `gitea.additionalConfigSources` | none | `gitea-app-ini-secrets` (database password, Valkey URLs, metrics token, the four signing keys) | Secrets stay out of Git and out of state |
 | `gitea.config` | defaults | database on RDS with TLS; cache, session, queue and global lock on Valkey; issue indexer `db`, repo indexer off; built-in SSH server on 2222 with the shared host key; `PUBLIC_URL_DETECTION: auto`; registration off; 300 s graceful shutdown | Two pods share all state; no domain |
 | Pod lifecycle | no preStop | `preStop: sleep 60`, added by a Helmfile `strategicMergePatches` (the chart has no value for it) | Load balancers stop routing before Gitea stops |
+| `initPreScript` | empty | `mkdir -p` of every folder Gitea uses on `/data` | No folder races on a fresh install |
+| `gitea.config.oauth2.JWT_SIGNING_ALGORITHM` | RS256 (a key file per pod) | HS256 (the shared JWT_SECRET) | Same signing key on every pod, no key file race |
+| `init-directories` volume mounts | every extra init mount | without the per-pod `app.ini` mount (Helmfile patch) | The first init step creates `/data/gitea/conf` itself, so the mount point never races |
 
 Outside the chart, one namespace label enables Auto Mode's readiness gates
 (`eks.amazonaws.com/pod-readiness-gate-inject: enabled`, in `charts/gitea-cluster`).
+
+## A fresh install: two pods starting together
+
+An upgrade starts one new pod at a time, so it never runs into these. A brand-new install is
+different: both pods start at the same second, against an empty EFS volume and an empty database.
+Everything the stock chart and Gitea create on first start, they create twice, at once. Testing
+fresh installs from scratch found five races. Each one is listed with what we saw, why it
+happened and the fix.
+
+1. **Both pods wrote the same `app.ini`.**
+   Seen: one pod started Gitea's first-time setup page ("install mode") and answered every API
+   call with 404, so half of all requests failed; it then overwrote the shared `app.ini` with a
+   single line. Cause: the chart keeps `app.ini` at `/data/gitea/conf`, on the shared volume, and
+   every pod's `init-app-ini` init container rewrites it in place (`config_environment.sh`); one
+   pod read it half-written. Fix: each pod gets its own `app.ini` on a per-pod `emptyDir` mounted
+   at `/data/gitea/conf`, built fresh at every start (`helmfile/values/gitea.yaml.gotmpl`).
+2. **Each pod generated its own signing keys.**
+   Seen: on a fresh volume the chart's script generates SECRET_KEY, INTERNAL_TOKEN, JWT_SECRET
+   and LFS_JWT_SECRET per pod, so the pods could sign cookies and tokens with different keys.
+   Fix: the bootstrap generates the four keys once into `gitea/app-ini-keys` (Secrets Manager,
+   write-only); External Secrets puts them into every pod's config, and they override the
+   generated ones. Both pods showed the same key fingerprint.
+3. **Both pods created Gitea's folders on `/data`.**
+   Seen: `mkdir /data/home: file exists`, then `mkdir /data/jwt: file exists`; the losing pod's
+   Gitea container exited and restarted. Cause: Gitea creates its folders on first start, and two
+   pods racing on EFS can see "file exists" for a folder the other just made. Fix: the chart's
+   `initPreScript` creates every folder Gitea uses (`home`, `jwt`, `attachments`, `avatars`,
+   `lfs`, `packages`, `repo-archive`, `repo-avatars`, `actions_log`, `actions_artifacts`,
+   `git/gitea-repositories`) with `mkdir -p`, which doesn't fail when the folder exists.
+4. **Each pod generated its own OAuth2 signing key file.**
+   Seen: the `/data/jwt` race above came from Gitea creating `/data/jwt/private.pem` for OAuth2
+   tokens (the default RS256). Two pods could also end up signing with different keys. Fix:
+   `[oauth2] JWT_SIGNING_ALGORITHM = HS256`, which signs with the shared JWT_SECRET; no key file.
+5. **The per-pod `app.ini` mount point was created on EFS by both pods.**
+   Seen: `error mounting ... app-ini to rootfs at /data/gitea/conf ... no such file or
+   directory` on one pod's first init container. Cause: to mount the per-pod volume inside the
+   EFS volume, the container runtime first creates `/data/gitea/conf` on EFS, and the two pods did
+   it at once. Fix: a Helmfile patch leaves that mount off the first init container
+   (`init-directories`), which creates the folder itself with the chart's own `mkdir -p`; the
+   later containers mount the per-pod volume over it (`helmfile/helmfile.yaml.gotmpl`).
+
+Already safe: both pods' `configure-gitea` create the admin user, and one finds it already made
+by the other and only syncs the password. The database migration on a fresh database ran in both
+pods without errors.
+
+Safety net for anything not on this list: the readiness probe checks `GET /api/v1/version`,
+which fails in install mode, so a broken pod never gets traffic.
+
+How it was checked: a fresh install from an empty AWS account, then both pods inspected directly
+(their own `app.ini`, identical keys, admin login on each pod, 40 of 40 logins through the ALB)
+and every container's restart count, init containers included, which must be 0.
 
 ## How we know it works
 
