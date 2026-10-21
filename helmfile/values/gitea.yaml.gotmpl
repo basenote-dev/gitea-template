@@ -66,6 +66,13 @@ extraContainerVolumeMounts:
   - name: app-ini
     mountPath: /data/gitea/conf
 
+# Create Gitea's git home before Gitea starts. Gitea makes /data/home itself at startup, and two
+# pods starting together on the shared volume race on it: one fails with "mkdir /data/home: file
+# exists" and restarts (seen on a fresh install). `mkdir -p` in the init container doesn't fail
+# when the folder already exists.
+initPreScript: |
+  mkdir -p /data/home
+
 containerSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
