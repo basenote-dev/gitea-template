@@ -75,7 +75,8 @@ To roll back, don't lower the version (Gitea can't run on tables a newer version
 Restore the database with RDS point-in-time recovery to a minute before the upgrade.
 
 Why it is built this way (two pods, EFS, Valkey, the shared SSH key) is in
-[adrs/0001-zero-downtime-gitea.md](adrs/0001-zero-downtime-gitea.md).
+[adrs/0001-zero-downtime-gitea.md](adrs/0001-zero-downtime-gitea.md). Every piece we built ourselves, on top of
+the off-the-shelf modules and charts, is listed in [adrs/0002-what-we-built.md](adrs/0002-what-we-built.md).
 
 ## Watch a zero-downtime upgrade
 
