@@ -10,7 +10,7 @@ Plain OpenTofu for every AWS resource Gitea runs on. There is no Terragrunt here
 | EKS Add-ons | EFS CSI driver and CloudWatch Observability with Pod Identity roles, Container Insights log groups |
 | External Secrets Pod Identity | Role for External Secrets Operator that can read only the five `gitea/*` secrets |
 | Security Groups | PostgreSQL 5432, Valkey 6379, NFS 2049, each only from the cluster primary security group |
-| RDS | PostgreSQL 17, `db.m7g.large`, Multi-AZ (standby in a second AZ), no deletion protection |
+| RDS | PostgreSQL 17, `db.m7g.large`, single AZ, no deletion protection |
 | ElastiCache Valkey | Valkey 8.2, one `cache.m7g.large` node, TLS and auth token |
 | EFS | Elastic throughput, mount targets in the private subnets, access point uid/gid 1000 at `/gitea`, AWS Backup |
 
