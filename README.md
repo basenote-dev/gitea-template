@@ -78,6 +78,8 @@ Restore the database with RDS point-in-time recovery instead.
 Why it's built this way: [adrs/0001-zero-downtime-gitea.md](adrs/0001-zero-downtime-gitea.md).
 Everything we built on top of the stock modules and charts:
 [adrs/0002-what-we-built.md](adrs/0002-what-we-built.md).
+What the bootstrap creates, and how pipelines and `kubectl` log in:
+[adrs/0003-bootstrap-and-access.md](adrs/0003-bootstrap-and-access.md).
 
 ## Watch a zero-downtime upgrade
 
