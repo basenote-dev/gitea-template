@@ -308,6 +308,35 @@ module "ssh_host_key" {
   secret_string_wo_version = 1
 }
 
+# Gitea's own secret keys. Gitea signs cookies and tokens with these, so every pod must use the
+# same ones. Left alone, each pod's init container generates its own on a fresh install (the
+# chart's config_environment.sh), and the two pods can end up with different keys. Generated
+# once here instead, like the SSH host key. The JWT secrets are 32 bytes in base64url (43
+# characters from A-Z a-z 0-9 - _), the format `gitea generate secret` produces.
+ephemeral "random_password" "app_ini_key" {
+  for_each = {
+    secret_key     = { length = 64, special = false }
+    internal_token = { length = 64, special = false }
+    jwt_secret     = { length = 43, special = true }
+    lfs_jwt_secret = { length = 43, special = true }
+  }
+
+  length           = each.value.length
+  special          = each.value.special
+  override_special = "-_"
+}
+
+module "app_ini_keys" {
+  source = "../../modules/terraform-aws-secrets-manager"
+
+  name                    = "${local.name}/app-ini-keys"
+  description             = "Gitea SECRET_KEY, INTERNAL_TOKEN, JWT_SECRET and LFS_JWT_SECRET (JSON)"
+  recovery_window_in_days = local.secret_recovery_window_days
+
+  secret_string_wo         = jsonencode({ for k, v in ephemeral.random_password.app_ini_key : k => v.result })
+  secret_string_wo_version = 1
+}
+
 ################################################################################
 # GitHub Environments
 ################################################################################
