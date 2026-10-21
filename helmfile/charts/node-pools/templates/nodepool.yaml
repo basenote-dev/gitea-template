@@ -1,0 +1,42 @@
+# Where every workload runs (Auto Mode's built-in "system" pool only takes critical add-ons).
+# On-demand only (no Spot interruptions mid-demo), Graviton (arm64, ~20% cheaper than x86),
+# instance sizes and a hard total cap per account (helmfile/env/<account>.yaml).
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: workloads
+spec:
+  # Preferred over Auto Mode's built-in general-purpose pool (weight 0) whenever both fit.
+  weight: 100
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: tagged # templates/nodeclass.yaml
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"]
+        - key: eks.amazonaws.com/instance-category
+          operator: In
+          values: ["c", "m", "r"]
+        - key: eks.amazonaws.com/instance-generation
+          operator: Gt
+          values: ["5"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: {{ .Values.instanceSizes | toJson }}
+      expireAfter: 336h
+  # Cost guardrail: Karpenter will never run more than this in total.
+  limits:
+    cpu: {{ .Values.cpuLimit | quote }}
+    memory: {{ .Values.memoryLimit | quote }}
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 2m
+    budgets:
+      - nodes: "1" # replace at most one node at a time

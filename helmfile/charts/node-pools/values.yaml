@@ -1,0 +1,7 @@
+instanceSizes: ["medium", "large"]
+cpuLimit: "8"
+memoryLimit: 32Gi
+nodeRoleName: ""      # from OpenTofu (eks node role)
+subnetIds: []         # private subnets
+securityGroupId: ""   # cluster security group
+tags: {}              # cost-allocation tags

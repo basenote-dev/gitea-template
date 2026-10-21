@@ -1,0 +1,16 @@
+# Statically provisioned: OpenTofu owns the EFS file system and its access point (uid/gid 1000,
+# rooted at /gitea), so the data's lifecycle never depends on Kubernetes.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: gitea-efs
+spec:
+  capacity:
+    storage: 100Gi # EFS is elastic; Kubernetes just needs a number
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-static
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: {{ required "efsVolumeHandle is required" .Values.efsVolumeHandle | quote }}

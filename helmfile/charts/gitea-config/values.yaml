@@ -1,0 +1,11 @@
+region: us-west-2
+valkeyEndpoint: ""      # host:port of the ElastiCache primary endpoint
+adminUser: gitea_admin
+secretNames: {}         # db, valkey, admin, metrics -> Secrets Manager secret names
+refreshInterval: 1h
+
+# The Gitea version being deployed (helmfile, from gitea_version in aws/main.tf).
+# Drives the upgrade gate in templates/gitea-upgrade.yaml.
+gitea:
+  image: ""             # docker.gitea.com/gitea:<version>-rootless
+  version: ""           # x.y.z

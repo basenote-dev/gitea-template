@@ -1,0 +1,5 @@
+apiVersion: v2
+name: gitea-config
+description: Gitea's wiring to AWS (ESO secrets, the EFS claim) and its upgrade gate.
+type: application
+version: 0.1.0

@@ -1,0 +1,8 @@
+{{- /*
+  The Gitea stack's `helmfile_values` output (endpoints, ARNs, secret names,
+  Gitea version), read straight from OpenTofu state. JSON is valid YAML, so it is used as is.
+  Helmfile renders this file from its own directory (helmfile/values/), so the relative path works
+  from the Terragrunt hooks in bootstrap/gitea/terragrunt.hcl and from a plain
+  `helmfile -e sandbox ...` alike.
+*/ -}}
+{{ exec "terragrunt" (list "output" "-json" "helmfile_values" "--tf-forward-stdout" "--non-interactive" "--log-level" "error" "--working-dir" "../../bootstrap/gitea") }}

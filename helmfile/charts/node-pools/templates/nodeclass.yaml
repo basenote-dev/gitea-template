@@ -1,0 +1,17 @@
+# Same as Auto Mode's built-in "default" NodeClass (node role, private subnets, cluster security
+# group), plus our cost-allocation tags. AWS launches Auto Mode instances itself, so they don't
+# inherit OpenTofu's provider default_tags; without this, EC2 would be the one untagged cost.
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: tagged
+spec:
+  role: {{ required "nodeRoleName is required" .Values.nodeRoleName | quote }}
+  subnetSelectorTerms:
+  {{- range .Values.subnetIds }}
+    - id: {{ . | quote }}
+  {{- end }}
+  securityGroupSelectorTerms:
+    - id: {{ required "securityGroupId is required" .Values.securityGroupId | quote }}
+  tags:
+    {{- toYaml .Values.tags | nindent 4 }}

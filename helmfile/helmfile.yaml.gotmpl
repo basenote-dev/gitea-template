@@ -1,0 +1,144 @@
+# Everything inside the cluster. OpenTofu builds the AWS side (aws/); this file installs the
+# Kubernetes side on top of it. Terragrunt runs it from hooks in bootstrap/gitea/terragrunt.hcl
+# (diff after plan, apply after apply, destroy before destroy);
+# by hand, from this directory:
+#
+#   helmfile -e sandbox diff     # what would change ("helm plan")
+#   helmfile -e sandbox apply    # diff, then upgrade only what changed
+#
+# One Helmfile environment per AWS account. Each reads its sizing from env/<account>.yaml and
+# its AWS values (endpoints, secret names, Gitea version) straight from the account stack's
+# `helmfile_values` output (values/tofu-outputs.yaml.gotmpl).
+#
+# Charts and images are pinned here and pulled from upstream. Every image uses
+# imagePullPolicy IfNotPresent: tags never move, so a node reuses what it already pulled.
+
+helmDefaults:
+  wait: true
+  timeout: 900
+  atomic: false # keep failed releases in place so they can be inspected
+  createNamespace: false
+
+environments:
+  sandbox:
+    values:
+      - env/sandbox.yaml
+      - values/tofu-outputs.yaml.gotmpl
+
+---
+{{- /* gitea_version in aws/main.tf; the chart appends "-rootless". */}}
+{{- $giteaTag := .Values.gitea_image_tag | toString }}
+{{- if not (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" $giteaTag) }}
+{{-   fail (printf "gitea_image_tag must be a release version like 1.26.3, got %q" $giteaTag) }}
+{{- end }}
+
+{{- /* The controller, webhook and cert-controller share one image: the chart's appVersion. */}}
+{{- $eso := dict
+      "repository" "ghcr.io/external-secrets/external-secrets"
+      "tag" "v2.13.0"
+      "pullPolicy" "IfNotPresent" }}
+
+repositories:
+  - name: gitea-charts
+    url: https://dl.gitea.com/charts/
+  - name: external-secrets
+    url: https://charts.external-secrets.io
+
+releases:
+  # Node capacity for everything below (on-demand Graviton, sized per account). Must exist first.
+  - name: node-pools
+    namespace: default
+    chart: ./charts/node-pools
+    values:
+      - instanceSizes: {{ .Values.nodePool.instanceSizes | toJson }}
+        cpuLimit: {{ .Values.nodePool.cpuLimit | quote }}
+        memoryLimit: {{ .Values.nodePool.memoryLimit | quote }}
+        nodeRoleName: {{ .Values.node_iam_role_name | quote }}
+        subnetIds: {{ .Values.node_subnet_ids | toJson }}
+        securityGroupId: {{ .Values.node_security_group_id | quote }}
+        tags: {{ .Values.resource_tags | toJson }}
+
+  # Syncs AWS Secrets Manager -> Kubernetes Secrets, using its Pod Identity role from OpenTofu.
+  - name: external-secrets
+    namespace: external-secrets
+    createNamespace: true
+    chart: external-secrets/external-secrets
+    version: 2.13.0
+    needs:
+      - default/node-pools
+    values:
+      - values/external-secrets.yaml
+      - image: {{ $eso | toJson }}
+        webhook:
+          image: {{ $eso | toJson }}
+        certController:
+          image: {{ $eso | toJson }}
+
+  # Cluster-scoped objects for Gitea: its namespace (with Pod Security labels), the EFS
+  # PersistentVolume and the account's ALB IngressClass. Installed from "default" because a chart
+  # can't create the namespace it is installed into.
+  - name: gitea-cluster
+    namespace: default
+    chart: ./charts/gitea-cluster
+    needs:
+      - default/node-pools
+    values:
+      - efsVolumeHandle: {{ .Values.efs_volume_handle | quote }}
+        groupName: {{ .Environment.Name | quote }}
+        inboundCidrs: {{ .Values.allowed_cidrs | toJson }}
+
+  # Gitea's wiring to AWS: secrets (via ESO) and the shared EFS claim. Also the upgrade gate: when
+  # the Gitea version changes, its pre-upgrade hook refuses a downgrade and, on a minor/major
+  # bump, runs `gitea migrate` with the new image. Helmfile upgrades this release before the gitea
+  # release (needs), so the schema is migrated before any pod rolls.
+  - name: gitea-config
+    namespace: gitea
+    chart: ./charts/gitea-config
+    needs:
+      - external-secrets/external-secrets
+      - default/gitea-cluster
+    values:
+      - region: {{ .Values.region | quote }}
+        valkeyEndpoint: {{ .Values.valkey_endpoint | quote }}
+        adminUser: {{ .Values.gitea_admin_username | quote }}
+        secretNames:
+{{ .Values.secret_names | toYaml | indent 10 }}
+        gitea:
+          image: "docker.gitea.com/gitea:{{ $giteaTag }}-rootless"
+          version: {{ $giteaTag | quote }}
+
+  - name: gitea
+    namespace: gitea
+    chart: gitea-charts/gitea
+    version: 12.7.0
+    needs:
+      - gitea/gitea-config
+    values:
+      - values/gitea.yaml.gotmpl
+      # docker.gitea.com/gitea:<gitea_image_tag>-rootless
+      - image:
+          registry: docker.gitea.com
+          repository: gitea
+          tag: {{ $giteaTag | quote }}
+          rootless: true
+          pullPolicy: IfNotPresent
+    # The chart has no `lifecycle` setting. A preStop pause keeps a stopping pod serving while the
+    # ALB/NLB stop sending it new connections: the controller only starts deregistering ~15s after
+    # the pod is told to stop, and the NLB takes a while longer, so 15s dropped an SSH connection
+    # in the first upgrade test. Gitea then drains open connections (GRACEFUL_HAMMER_TIME).
+    # (Helmfile yoinks the rendered chart and patches it with kustomize.)
+    strategicMergePatches:
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: gitea
+          namespace: gitea
+        spec:
+          template:
+            spec:
+              containers:
+                - name: gitea
+                  lifecycle:
+                    preStop:
+                      sleep:
+                        seconds: 60

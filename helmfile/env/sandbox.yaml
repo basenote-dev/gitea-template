@@ -1,0 +1,7 @@
+# Sandbox sizing: enough for a reliable live demo, nothing more.
+gitea:
+  replicas: 2            # two replicas = rolling updates with zero downtime
+nodePool:
+  instanceSizes: ["medium", "large"]
+  cpuLimit: "8"          # hard cap on total node capacity
+  memoryLimit: 32Gi

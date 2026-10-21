@@ -1,0 +1,177 @@
+# Values for the official Gitea chart (https://gitea.com/gitea/helm-gitea).
+# Secrets never appear here: they come from the ESO-managed Secrets in charts/gitea-config.
+
+replicaCount: {{ .Values.gitea.replicas }}
+
+# Zero-downtime rollouts: start a new pod, wait until the ALB says it's healthy, then retire an
+# old one. Safe because no pod holds state (RDS, Valkey and EFS hold it all).
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+podDisruptionBudget:
+  minAvailable: 1
+
+# image: set in helmfile.yaml.gotmpl (tag from gitea_version in aws/main.tf).
+
+# Run on our tagged Graviton pool (helmfile/charts/node-pools), never on Auto Mode's built-in
+# general-purpose pool, so node cost carries the melange-industries tags and uses arm64.
+nodeSelector:
+  karpenter.sh/nodepool: workloads
+
+# Spread replicas over AZs so losing one zone never takes Gitea down.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: gitea
+        app.kubernetes.io/instance: gitea
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+podSecurityContext:
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+# The shared SSH host key (gitea.config.server.SSH_SERVER_HOST_KEYS below), group-readable for
+# the git user through fsGroup.
+extraVolumes:
+  - name: ssh-host-key
+    secret:
+      secretName: gitea-ssh-host-key
+      defaultMode: 0440
+extraContainerVolumeMounts:
+  - name: ssh-host-key
+    mountPath: /etc/gitea-ssh
+    readOnly: true
+
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+# Long git clones/pushes finish on the old pod: 60s preStop + up to 5 min of Gitea graceful
+# shutdown (GRACEFUL_HAMMER_TIME) inside a 6 min grace period. Target-group drain windows match.
+deployment:
+  terminationGracePeriodSeconds: 360
+
+# Shared EFS claim created by charts/gitea-config.
+persistence:
+  enabled: true
+  create: false
+  claimName: gitea-shared-storage
+  accessModes:
+    - ReadWriteMany
+
+# Web: an Ingress on the account's shared ALB (IngressClass "alb", see charts/gitea-cluster).
+# Gitea is served at the root of the load balancer's hostname: http://<load balancer>/.
+service:
+  http:
+    clusterIP: ""
+  # SSH: a LoadBalancer Service, which Auto Mode turns into an NLB on port 22 (an ALB can't carry
+  # SSH).
+  ssh:
+    type: LoadBalancer
+    clusterIP: ""
+    port: 22
+    loadBalancerClass: eks.amazonaws.com/nlb
+    loadBalancerSourceRanges: {{ .Values.allowed_cidrs | toJson }}
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      # Long git-over-SSH operations finish on a draining pod instead of being cut.
+      service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: deregistration_delay.timeout_seconds=300,deregistration_delay.connection_termination.enabled=false
+
+ingress:
+  enabled: true
+  className: alb
+  pathType: Prefix
+  annotations:
+    alb.ingress.kubernetes.io/target-type: ip
+    # No domain, so no certificate: plain HTTP on the load balancer's own hostname.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /api/healthz
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=300
+  hosts:
+    # Empty host: the rule matches the load balancer's own name.
+    - host: ""
+      paths:
+        - path: /
+
+# Bundled data stores off: state lives in RDS / ElastiCache / EFS.
+postgresql-ha:
+  enabled: false
+postgresql:
+  enabled: false
+valkey-cluster:
+  enabled: false
+valkey:
+  enabled: false
+
+test:
+  enabled: false
+
+gitea:
+  admin:
+    existingSecret: gitea-admin
+    email: admin@example.com
+    passwordMode: keepUpdated
+
+  metrics:
+    enabled: true # bearer token comes from the ESO-managed secret
+
+  # Passwords, Valkey URL and metrics token, one key per app.ini section (charts/gitea-config).
+  additionalConfigSources:
+    - secret:
+        secretName: gitea-app-ini-secrets
+
+  config:
+    APP_NAME: "Gitea on EKS"
+    server:
+      # No domain: Gitea takes the host from each request (PUBLIC_URL_DETECTION auto), so its
+      # links follow whatever load balancer hostname the browser used. ROOT_URL's host shows up
+      # only where there is no request (mails, webhooks) and in the SSH clone URL, which reads
+      # "localhost": use the SSH host the apply printed.
+      ROOT_URL: "http://localhost/"
+      PUBLIC_URL_DETECTION: auto
+      SSH_PORT: 22
+      SSH_LISTEN_PORT: 2222
+      # One host key for every pod, from Secrets Manager (charts/gitea-config). Without it each
+      # pod generates its own on first start and SSH clients see the host key change.
+      SSH_SERVER_HOST_KEYS: /etc/gitea-ssh/gitea.ed25519
+      LFS_START_SERVER: true
+      GRACEFUL_HAMMER_TIME: 300s
+    database:
+      DB_TYPE: postgres
+      HOST: {{ .Values.rds_endpoint | quote }}
+      NAME: gitea
+      USER: gitea
+      SSL_MODE: require
+    indexer:
+      # bleve can't be opened by two pods at once; the DB indexer can.
+      ISSUE_INDEXER_TYPE: db
+      REPO_INDEXER_ENABLED: false
+    service:
+      DISABLE_REGISTRATION: true
+    security:
+      MIN_PASSWORD_LENGTH: 12
+      PASSWORD_COMPLEXITY: lower,upper,digit
+    migrations:
+      # Never let the repo-migration feature reach private networks (SSRF guard).
+      ALLOW_LOCALNETWORKS: false
+    log:
+      LEVEL: Info

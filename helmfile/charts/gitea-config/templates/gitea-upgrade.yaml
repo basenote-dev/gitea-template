@@ -1,0 +1,117 @@
+{{- /*
+  Upgrade gate for Gitea version changes. Helmfile upgrades this release before the gitea
+  release (needs), and Helm runs pre-upgrade hooks before anything else in a release, so this
+  runs before any Gitea pod rolls. Compared with the running Deployment's image:
+
+    - no Gitea yet, same version, or a patch bump (1.26.3 -> 1.26.4): nothing. Patch releases
+      don't change the schema, so a plain rolling update is safe.
+    - minor or major bump (1.26 -> 1.27, 1.27 -> 28): a Job runs `gitea migrate` with the NEW
+      image. OpenTofu took an RDS snapshot earlier in the same apply (Gitea Upgrade Snapshot in
+      aws/main.tf). If the migration fails, the deploy stops and the old pods keep
+      serving. The new pods' own init-time migration then finds nothing left to do.
+    - downgrade: refused. Gitea can't run on a schema a newer version has migrated.
+
+  Old pods keep serving between the migration and the end of the rollout, so a release whose
+  migration drops or renames something they still use needs a maintenance window instead. Read
+  the release notes before a minor/major bump.
+
+  `lookup` sees the cluster only during a real install or upgrade (it is empty in helmfile diff
+  and template), so the Job never shows up in a diff. The ConfigMap makes a version change a
+  change of this release, so Helmfile always upgrades it, and runs the hook, when the version moves.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-version
+data:
+  version: {{ .Values.gitea.version | quote }}
+  image: {{ .Values.gitea.image | quote }}
+{{- $deployment := lookup "apps/v1" "Deployment" .Release.Namespace "gitea" }}
+{{- $running := "" }}
+{{- if and $deployment .Values.gitea.version }}
+{{-   range $deployment.spec.template.spec.containers }}
+{{-     if eq .name "gitea" }}
+{{-       $running = regexFind "[0-9]+\\.[0-9]+\\.[0-9]+" (last (splitList ":" .image)) }}
+{{-     end }}
+{{-   end }}
+{{- end }}
+{{- if $running }}
+{{- $old := semver $running }}
+{{- $new := semver .Values.gitea.version }}
+{{- if lt ($new.Compare $old) 0 }}
+{{-   fail (printf "Refusing to downgrade Gitea %s -> %s. Restore the pre-upgrade RDS snapshot instead." $running .Values.gitea.version) }}
+{{- else if or (ne $new.Major $old.Major) (ne $new.Minor $old.Minor) }}
+---
+# Gitea {{ $running }} -> {{ .Values.gitea.version }}: migrate the schema before the pods roll.
+# Same app.ini, data volume, user and node pool as the Gitea pods; labels no Service selects.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gitea-migrate
+  labels:
+    app.kubernetes.io/name: gitea-migrate
+  annotations:
+    helm.sh/hook: pre-upgrade
+    # Kept after it finishes so its logs can be read; replaced by the next migration.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gitea-migrate
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        karpenter.sh/nodepool: workloads
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ .Values.gitea.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["gitea", "migrate"]
+          # The chart's paths: app.ini is written to the shared EFS volume by the Gitea pods'
+          # init containers (database settings and password included).
+          env:
+            - name: GITEA_APP_INI
+              value: /data/gitea/conf/app.ini
+            - name: GITEA_CUSTOM
+              value: /data/gitea
+            - name: GITEA_WORK_DIR
+              value: /data
+            - name: GITEA_TEMP
+              value: /tmp/gitea
+            - name: HOME
+              value: /data/gitea/git
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: temp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gitea-shared-storage
+        - name: temp
+          emptyDir: {}
+{{- end }}
+{{- end }}

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: node-pools
+description: EKS Auto Mode NodePool for workloads - small on-demand Graviton capacity.
+type: application
+version: 0.1.0
