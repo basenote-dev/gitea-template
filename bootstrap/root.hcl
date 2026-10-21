@@ -70,9 +70,8 @@ remote_state {
 # AWS Provider
 ################################################################################
 # Region and account come from account.hcl (the caller's own credentials). With
-# EXPECTED_ACCOUNT_ID set, allowed_account_ids makes OpenTofu refuse to run with credentials for
-# any other account (config for one account can never touch another by accident). Every resource gets
-# the account's cost-allocation tags through default_tags.
+# EXPECTED_ACCOUNT_ID set, allowed_account_ids makes OpenTofu refuse credentials for any other
+# account. Every resource gets the account's cost-allocation tags through default_tags.
 
 generate "provider" {
   path      = "provider.tf"
@@ -94,8 +93,8 @@ generate "provider" {
 ################################################################################
 # OpenTofu client-side encryption (AES-GCM, data key from the account's KMS key
 # alias/gitea-tofu-state). `enforced` makes OpenTofu refuse to read or write unencrypted state
-# or plan files, so anything a provider keeps in state (and plan files CI saves) is ciphertext
-# even to someone who can read the bucket.
+# or plan files, so state and saved plan files are ciphertext even to someone who can read the
+# bucket.
 #
 # Disabled for state/: it creates that key, so it can't depend on it.
 

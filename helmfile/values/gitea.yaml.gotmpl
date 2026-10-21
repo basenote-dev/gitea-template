@@ -4,7 +4,7 @@
 replicaCount: {{ .Values.gitea.replicas }}
 
 # Zero-downtime rollouts: start a new pod, wait until the ALB says it's healthy, then retire an
-# old one. Safe because no pod holds state (RDS, Valkey and EFS hold it all).
+# old one. This works because no pod holds state; RDS, Valkey and EFS hold all of it.
 strategy:
   type: RollingUpdate
   rollingUpdate:
@@ -21,7 +21,8 @@ podDisruptionBudget:
 nodeSelector:
   karpenter.sh/nodepool: workloads
 
-# Spread replicas over AZs so losing one zone never takes Gitea down.
+# Prefer replicas in different AZs, so losing one zone usually leaves a pod running. Preferred,
+# not required (ScheduleAnyway): with too few nodes both pods still start.
 topologySpreadConstraints:
   - maxSkew: 1
     topologyKey: topology.kubernetes.io/zone
@@ -77,7 +78,7 @@ persistence:
   accessModes:
     - ReadWriteMany
 
-# Web: an Ingress on the account's shared ALB (IngressClass "alb", see charts/gitea-cluster).
+# Web: an Ingress on the shared ALB (IngressClass "alb", see charts/gitea-cluster).
 # Gitea is served at the root of the load balancer's hostname: http://<load balancer>/.
 service:
   http:

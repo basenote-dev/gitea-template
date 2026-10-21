@@ -1,6 +1,6 @@
 # Where every workload runs (Auto Mode's built-in "system" pool only takes critical add-ons).
 # On-demand only (no Spot interruptions mid-demo), Graviton (arm64, ~20% cheaper than x86),
-# instance sizes and a hard total cap per account (helmfile/env/<account>.yaml).
+# with instance sizes and a hard total cap from helmfile/env/sandbox.yaml.
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:

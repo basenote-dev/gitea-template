@@ -25,7 +25,7 @@ output "helmfile_values" {
     valkey_endpoint   = "${aws_elasticache_replication_group.valkey.primary_endpoint_address}:${aws_elasticache_replication_group.valkey.port}"
     efs_volume_handle = "${module.efs.id}::${module.efs.access_points["gitea"].id}" # EFS CSI form: <fs>::<access point>
 
-    # Secrets Manager names External Secrets reads (db, valkey, admin, metrics)
+    # Secrets Manager names External Secrets reads (db, valkey, admin, metrics, ssh_host_key)
     secret_names         = { for k, s in data.aws_secretsmanager_secret.this : k => s.name }
     gitea_admin_username = local.gitea_admin_username
 

@@ -1,6 +1,6 @@
 # The "alb" IngressClass for EKS Auto Mode's load balancer controller. Every Ingress using it
-# joins one shared, internet-facing ALB per account (group), HTTP only (no domain or
-# certificate).
+# joins one shared, internet-facing ALB (group), HTTP only since there is no domain or
+# certificate.
 apiVersion: eks.amazonaws.com/v1
 kind: IngressClassParams
 metadata:
