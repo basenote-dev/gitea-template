@@ -20,7 +20,7 @@ name: Gitea Deploy
 run-name: >-
   ${{ github.event_name == 'pull_request' && format('OpenTofu Plan · #{0} {1}', github.event.pull_request.number, github.event.pull_request.title)
   || github.event_name == 'push' && format('OpenTofu Apply · {0}', github.event.head_commit.message)
-  || format('OpenTofu {0} (Manual) · started by {1}', inputs.action == 'apply' && 'Apply' || inputs.action == 'destroy' && 'Destroy' || 'Plan', github.actor) }}
+  || format('{0} (Manual) · started by {1}', inputs.action, github.actor) }}
 
 on:
   pull_request:
@@ -30,10 +30,10 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: What to run
+        description: Which pipeline to run against the sandbox account
         type: choice
-        options: [plan, apply, destroy]
-        default: plan
+        options: [OpenTofu Plan, OpenTofu Apply, OpenTofu Destroy]
+        default: OpenTofu Plan
 
 permissions:
   contents: read
@@ -54,7 +54,7 @@ jobs:
     if: >-
       vars.BOOTSTRAPPED == 'true' && (
         github.event_name == 'pull_request' ||
-        (github.event_name == 'workflow_dispatch' && inputs.action == 'plan')
+        (github.event_name == 'workflow_dispatch' && inputs.action == 'OpenTofu Plan')
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -100,7 +100,7 @@ jobs:
     if: >-
       vars.BOOTSTRAPPED == 'true' && (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-        (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+        (github.event_name == 'workflow_dispatch' && inputs.action == 'OpenTofu Apply')
       )
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -141,16 +141,20 @@ jobs:
 
       - name: Write Gitea URL to Job Summary
         run: |
-          lb=$(kubectl --context gitea-sandbox --namespace gitea get ingress gitea --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+          lb() { kubectl --context gitea-sandbox --namespace gitea get "$1" --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true; }
+          web=$(lb ingress/gitea)
+          ssh=$(lb service/gitea-ssh)
           {
-            echo "### sandbox: ${lb:+http://$lb/}"
+            echo "### Gitea on the Sandbox Account"
             echo
-            echo "Admin user \`gitea_admin\`; password in AWS console -> Secrets Manager -> \`gitea/admin\`."
+            echo "- Web: ${web:+http://$web/}"
+            echo "- SSH: ${ssh:+git@$ssh}"
+            echo "- Admin user: \`gitea_admin\` (password in AWS Secrets Manager, \`gitea/admin\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   destroy:
     name: Helm Uninstall + OpenTofu Destroy
-    if: vars.BOOTSTRAPPED == 'true' && github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+    if: vars.BOOTSTRAPPED == 'true' && github.event_name == 'workflow_dispatch' && inputs.action == 'OpenTofu Destroy'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment: sandbox-apply
