@@ -79,14 +79,10 @@ locals {
 
   # Only the EKS cluster primary security group (Auto Mode nodes and pods) reaches these.
   data_store_ports = {
-    db-proxy = 5432
     postgres = 5432
     valkey   = 6379
     efs      = 2049
   }
-
-  # Bump after rotating gitea/db: pushes the new password to RDS and to the proxy's secret.
-  db_password_version = 1
 
   log_retention_days       = 30 # EKS control plane, Container Insights, VPC flow logs, RDS
   db_backup_retention_days = 7  # RDS point-in-time recovery window
@@ -318,9 +314,8 @@ module "external_secrets_pod_identity" {
 # Security Groups
 ################################################################################
 # One group per data store, each open on its port only to the EKS cluster primary security
-# group (Auto Mode puts it on every node). The database also accepts the RDS Proxy. Kept
-# together here so all data store network access reads in one place: the RDS module has no
-# security group, and Valkey and the proxy are plain resources.
+# group (Auto Mode puts it on every node). Kept together here so all data store network access
+# reads in one place: the RDS module has no security group, and Valkey is a plain resource.
 
 resource "aws_security_group" "data_store" {
   for_each = local.data_store_ports
@@ -347,15 +342,6 @@ resource "aws_vpc_security_group_ingress_rule" "data_store" {
   from_port                    = each.value
   to_port                      = each.value
   description                  = "EKS cluster primary security group"
-}
-
-resource "aws_vpc_security_group_ingress_rule" "postgres_from_db_proxy" {
-  security_group_id            = aws_security_group.data_store["postgres"].id
-  referenced_security_group_id = aws_security_group.data_store["db-proxy"].id
-  ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
-  description                  = "RDS Proxy"
 }
 
 ################################################################################
@@ -385,7 +371,7 @@ module "rds" {
 
   manage_master_user_password = false
   password_wo                 = ephemeral.aws_secretsmanager_secret_version.db.secret_string
-  password_wo_version         = local.db_password_version
+  password_wo_version         = 1 # bump after rotating gitea/db to push the new value to RDS
 
   allocated_storage     = 20
   max_allocated_storage = 100
@@ -418,95 +404,6 @@ module "rds" {
 
   deletion_protection = local.db_deletion_protection
   skip_final_snapshot = !local.db_deletion_protection
-}
-
-################################################################################
-# RDS Proxy
-################################################################################
-# Gitea connects to the proxy, not to the database. The proxy keeps Gitea's connections open
-# while the database fails over to its standby, holds new queries until the new primary
-# answers, and reconnects to it on its own, so a failover shows up as slower requests instead
-# of errors. Without it, a forced failover failed requests for about 40 seconds and left pods
-# with dead pooled connections.
-#
-# The proxy logs in to the database with a JSON secret ({"username", "password"}). It is
-# written here from the same gitea/db password, write-only, so the value never reaches state.
-
-resource "aws_secretsmanager_secret" "db_proxy" {
-  name                    = "${local.name}/db-proxy"
-  description             = "Gitea database login for RDS Proxy (from gitea/db)"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "db_proxy" {
-  secret_id = aws_secretsmanager_secret.db_proxy.id
-  secret_string_wo = jsonencode({
-    username = "gitea"
-    password = ephemeral.aws_secretsmanager_secret_version.db.secret_string
-  })
-  secret_string_wo_version = local.db_password_version
-}
-
-resource "aws_iam_role" "db_proxy" {
-  name_prefix = "${local.name}-db-proxy-"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "rds.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "db_proxy" {
-  name = "read-db-proxy-secret"
-  role = aws_iam_role.db_proxy.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "secretsmanager:GetSecretValue"
-      Resource = aws_secretsmanager_secret.db_proxy.arn
-    }]
-  })
-}
-
-resource "aws_db_proxy" "this" {
-  name           = "${local.name}-db"
-  engine_family  = "POSTGRESQL"
-  role_arn       = aws_iam_role.db_proxy.arn
-  require_tls    = true
-  vpc_subnet_ids = module.vpc.private_subnets
-
-  vpc_security_group_ids = [aws_security_group.data_store["db-proxy"].id]
-
-  auth {
-    auth_scheme               = "SECRETS"
-    secret_arn                = aws_secretsmanager_secret.db_proxy.arn
-    iam_auth                  = "DISABLED"
-    client_password_auth_type = "POSTGRES_SCRAM_SHA_256"
-  }
-
-  depends_on = [aws_secretsmanager_secret_version.db_proxy, aws_iam_role_policy.db_proxy]
-}
-
-# A query that arrives during a failover waits up to 120 s for a database connection.
-resource "aws_db_proxy_default_target_group" "this" {
-  db_proxy_name = aws_db_proxy.this.name
-
-  connection_pool_config {
-    connection_borrow_timeout = 120
-    max_connections_percent   = 100
-  }
-}
-
-resource "aws_db_proxy_target" "this" {
-  db_proxy_name          = aws_db_proxy.this.name
-  target_group_name      = aws_db_proxy_default_target_group.this.name
-  db_instance_identifier = module.rds.db_instance_identifier
 }
 
 ################################################################################
