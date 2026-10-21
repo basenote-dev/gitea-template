@@ -59,24 +59,22 @@ template), so pushing first is harmless.
 1. Change `gitea_version` in `aws/main.tf` in a pull request, one release at a time
    (1.26.3 -> 1.26.4 -> 1.27.3 -> 28.2.0).
 2. The PR's plan comment shows the change. Merge it.
-3. Helm starts one new pod. The load balancers send it traffic only after it passes their
-   health checks.
-4. Then one old pod is told to stop. It keeps serving for 60 seconds while the load balancers
-   move traffic off it, then finishes its open git operations and exits.
+3. Helm starts one new pod. It gets traffic only after the load balancers see it healthy.
+4. One old pod is told to stop. It serves 60 more seconds while traffic moves off it. Then it
+   finishes open git operations and exits.
 5. The same happens for the second pod. One pod is always serving.
-6. On a minor or major upgrade, the first new pod updates the database tables when it starts.
-   The old pod keeps working while that happens.
+6. On a minor or major upgrade, the first new pod updates the database tables. The old pod
+   keeps working meanwhile.
 
-Both pods share the same data, which is why the upgrade can swap them one at a time: repos on
-EFS, users and issues in RDS, sessions and cache in Valkey, and one SSH host key from Secrets
-Manager.
+The pods can swap one at a time because they share all data. Repos are on EFS. Users and
+issues are in RDS. Sessions and cache are in Valkey. The SSH host key comes from Secrets Manager.
 
-To roll back, don't lower the version (Gitea can't run on tables a newer version changed).
-Restore the database with RDS point-in-time recovery to a minute before the upgrade.
+To roll back, don't lower the version. Gitea can't run on tables a newer version changed.
+Restore the database with RDS point-in-time recovery instead.
 
-Why it is built this way (two pods, EFS, Valkey, the shared SSH key) is in
-[adrs/0001-zero-downtime-gitea.md](adrs/0001-zero-downtime-gitea.md). Every piece we built ourselves, on top of
-the off-the-shelf modules and charts, is listed in [adrs/0002-what-we-built.md](adrs/0002-what-we-built.md).
+Why it's built this way: [adrs/0001-zero-downtime-gitea.md](adrs/0001-zero-downtime-gitea.md).
+Everything we built on top of the stock modules and charts:
+[adrs/0002-what-we-built.md](adrs/0002-what-we-built.md).
 
 ## Watch a zero-downtime upgrade
 
@@ -86,25 +84,22 @@ Run this from your laptop, with the same AWS credentials, while a rollout happen
 scripts/zero-downtime-upgrade-healthcheck.sh
 ```
 
-It needs only the AWS CLI, git and curl. It finds Gitea's load balancers by their tags, logs in
-as the admin with the password from Secrets Manager, and creates a test repository and a
-temporary SSH key. Five loops then hit Gitea every 1-3 seconds: `/api/healthz`, `git ls-remote`
-over HTTP and over SSH, a commit pushed over SSH, and an issue created through the API. Every
-5 seconds it prints one line with each check's latest result and its ok/fail count:
+It needs only the AWS CLI, git and curl. It finds the load balancers by their tags. It logs in
+as the admin and makes a test repo and a temporary SSH key. Then five loops hit Gitea every 1-3
+seconds: `/api/healthz`, `git ls-remote` over HTTP and SSH, a push over SSH, and an issue created
+through the API. Every 5 seconds it prints each check's last result and ok/fail count:
 
 ```
 04:12:20  healthz ok       9/0  https-ls-remote ok       3/0  ssh-ls-remote ok       3/0  ssh-push ok       2/0  api-write ok       3/0
 ```
 
-Start it, merge an upgrade PR, and watch the counts while the pods roll. Ctrl-C prints the
-totals and the time of any failure; every result is kept in
-`zero-downtime-healthcheck-<time>.log`.
+Start it, merge an upgrade PR, and watch the counts. Ctrl-C prints the totals and the time of
+any failure. Every result is kept in `zero-downtime-healthcheck-<time>.log`.
 
 ## Running cost
 
-About $0.60 an hour (about $14 a day) while the cluster is up, at us-west-2 on-demand list
-prices. Tear it down when you're not using it; the bootstrap that stays behind costs about $3 a
-month (the state key and the secrets).
+About $0.60 an hour (about $14 a day) while the cluster is up, at us-west-2 list prices. Tear
+it down when you're done. The bootstrap left behind costs about $3 a month.
 
 | Piece | Per hour |
 | --- | --- |
@@ -120,15 +115,12 @@ Multi-AZ RDS would add about $0.17 an hour.
 
 ## Demo limitations
 
-This demo is about one thing: upgrading Gitea without downtime. Everything Gitea needs for
-that runs in two copies or lives outside the pods. The pieces below are kept single and simple
-to save cost; none of them is touched by a Gitea upgrade, and each has a known fix for
-production.
+This demo is about one thing: upgrading Gitea without downtime. The pieces below are kept
+single to save cost. A Gitea upgrade touches none of them. Each has a known production fix.
 
-- The database is in one AZ. AWS maintenance or a failure takes it offline for a few minutes,
-  and Gitea fails requests until it is back. Gitea upgrades don't touch it. Multi-AZ
-  (`db_multi_az = true`) cuts that to about 40 seconds; RDS Proxy in front would turn those
-  40 seconds into slow requests instead of errors.
+- The database is in one AZ. AWS maintenance or a failure takes it down for a few minutes.
+  Multi-AZ (`db_multi_az = true`) cuts that to about 40 seconds. RDS Proxy would turn those
+  seconds into slow requests instead of errors.
 - Valkey is a single node. If it restarts, users are logged out and queued jobs are lost.
 - HTTP only, on the load balancers' own hostnames. A domain would add HTTPS and a real SSH
   clone URL (Gitea's UI shows `git@localhost:...` without one).
