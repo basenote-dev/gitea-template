@@ -46,6 +46,7 @@ locals {
     admin        = "gitea/admin"
     metrics      = "gitea/metrics"
     ssh_host_key = "gitea/ssh-host-key"
+    app_ini_keys = "gitea/app-ini-keys"
   }
   gitea_admin_username = "gitea_admin"
 
@@ -270,7 +271,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 ################################################################################
 # External Secrets Pod Identity
 ################################################################################
-# External Secrets Operator (a Helmfile release) copies the five gitea/* secrets into Kubernetes
+# External Secrets Operator (a Helmfile release) copies the six gitea/* secrets into Kubernetes
 # Secrets. Its role can read exactly those. A custom policy instead of the module's
 # attach_external_secrets_policy, which also allows ListSecrets on every secret and kms:Decrypt
 # on every key.

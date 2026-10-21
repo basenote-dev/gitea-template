@@ -42,15 +42,36 @@ podSecurityContext:
 
 # The shared SSH host key (gitea.config.server.SSH_SERVER_HOST_KEYS below), group-readable for
 # the git user through fsGroup.
+#
+# app.ini on a per-pod volume. The chart keeps app.ini at /data/gitea/conf, on the shared EFS
+# volume, and every pod's init container rewrites it in place. Two pods starting together write
+# the same file at once: a pod can read it half-written and start in install mode, and install
+# mode then overwrites the shared file. Mounting a per-pod emptyDir over /data/gitea/conf gives
+# each pod its own app.ini, built fresh from these values and the secrets at every start. The
+# keys Gitea would otherwise generate per pod come from gitea/app-ini-keys instead.
 extraVolumes:
   - name: ssh-host-key
     secret:
       secretName: gitea-ssh-host-key
       defaultMode: 0440
+  - name: app-ini
+    emptyDir: {}
+extraInitVolumeMounts:
+  - name: app-ini
+    mountPath: /data/gitea/conf
 extraContainerVolumeMounts:
   - name: ssh-host-key
     mountPath: /etc/gitea-ssh
     readOnly: true
+  - name: app-ini
+    mountPath: /data/gitea/conf
+
+# Create Gitea's git home before Gitea starts. Gitea makes /data/home itself at startup, and two
+# pods starting together on the shared volume race on it: one fails with "mkdir /data/home: file
+# exists" and restarts (seen on a fresh install). `mkdir -p` in the init container doesn't fail
+# when the folder already exists.
+initPreScript: |
+  mkdir -p /data/home
 
 containerSecurityContext:
   runAsNonRoot: true
@@ -131,6 +152,13 @@ gitea:
 
   metrics:
     enabled: true # bearer token comes from the gitea/metrics secret
+
+  # Ready only when Gitea serves its API. The chart's default only checks that the port is open,
+  # which also passes for a pod stuck in install mode.
+  readinessProbe:
+    httpGet:
+      path: /api/v1/version
+      port: http
 
   # Passwords, Valkey URL and metrics token, one key per app.ini section (charts/gitea-config).
   additionalConfigSources:
