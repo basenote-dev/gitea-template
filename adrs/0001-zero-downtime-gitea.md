@@ -87,6 +87,9 @@ from that, and each one closes a specific gap.
 | Valkey for cache, sessions, queues and locks | `aws/main.tf`, `helmfile/charts/gitea-config` | Both copies share logins and background work | A user logged in on one pod looks logged out on the other; jobs run twice |
 | Database issue indexer | `helmfile/values/gitea.yaml.gotmpl` | Search works with two copies | Gitea's default index (bleve) can only be opened by one copy |
 | One SSH host key from Secrets Manager | `bootstrap/state`, `helmfile/charts/gitea-config` | Both copies show SSH clients the same identity | SSH refuses every other connection |
+| A per-pod `app.ini` (emptyDir over `/data/gitea/conf`) | `helmfile/values/gitea.yaml.gotmpl` | Each pod builds its own config file at start | Both pods rewrite one shared file on EFS at once; a pod can read it half-written and start in install mode (seen on a fresh deploy) |
+| Gitea's signing keys from Secrets Manager (`gitea/app-ini-keys`) | `bootstrap/state`, `helmfile/charts/gitea-config` | Both pods use the same SECRET_KEY, INTERNAL_TOKEN, JWT_SECRET and LFS_JWT_SECRET | Each pod generates its own keys on a fresh install, so cookies and tokens signed by one pod fail on the other |
+| HTTP readiness probe on `/api/v1/version` | `helmfile/values/gitea.yaml.gotmpl` | A pod is ready only when Gitea serves its API | The chart's TCP probe passes for a pod stuck in install mode, so it keeps getting traffic |
 | `maxSurge: 1` | `helmfile/values/gitea.yaml.gotmpl` | During an upgrade Kubernetes may run one extra pod (3 in total), so it starts the new pod before stopping an old one | Kubernetes could stop an old pod first |
 | `maxUnavailable: 0` | same file | Never fewer than 2 ready pods during an upgrade | Kubernetes could drop to 1 ready pod, or none |
 | Disruption budget, `minAvailable: 1` | same file | Covers everything that isn't an upgrade: when AWS replaces or empties a node, Kubernetes won't evict a pod if that would leave none running | A node replacement could stop both pods at once |
@@ -99,39 +102,63 @@ from that, and each one closes a specific gap.
 separate guard for the times AWS moves pods around on its own, like when Auto Mode replaces a
 node.
 
-## What happens during an upgrade
+## What happens during an upgrade, phase by phase
 
-1. Someone changes `gitea_version` in `aws/main.tf` in a pull request. The PR shows the plan;
-   merging it starts the deploy.
-2. Kubernetes creates a third pod with the new version (`maxSurge: 1` allows one extra pod
-   during an upgrade). The two old pods keep serving everything; the new pod gets no traffic
-   yet.
-3. The new pod starts like every Gitea pod: it updates the database tables if the version needs
-   it (see "The database during an upgrade" below), mounts the same EFS volume, loads the same
-   SSH host key and connects to RDS and Valkey. All three pods now share the same data.
-4. Kubernetes waits for the new pod's readiness probe to pass: Gitea answers and can reach the
-   database and cache. (The liveness probe is a different check that only restarts a pod that
-   hangs; it doesn't decide traffic.)
-5. The load balancer controller registers the new pod with the ALB (web and git over HTTP) and
-   the NLB (SSH). They run their own health checks and start sending it users only when those
-   pass. The readiness gate makes Kubernetes wait for that too, so the pod doesn't count as
-   ready until users can actually reach it.
-6. Kubernetes picks one old pod to stop. It may, because 2 ready pods remain
-   (`maxUnavailable: 0`). The pod is marked as terminating and the controller starts taking it
-   out of the load balancers, which takes about 15 seconds or more. The pod keeps running
-   normally for 60 seconds (the preStop pause), so anything that still reaches it is served.
-7. After those 60 seconds Gitea is told to shut down. It stops taking new work but finishes what
-   is in flight (page loads, clones, pushes) for up to 5 minutes.
-8. Meanwhile the load balancers drain that pod: they send it nothing new but keep its open
-   connections for up to 5 minutes instead of cutting them. A clone or push that started on the
-   old pod finishes on the old pod. Then the pod exits.
-9. Steps 2 to 8 repeat for the second old pod.
+Pods A and B run the old version; C and D are the new ones. "Endpoints" is the list of pods the
+Kubernetes Service sends to; the ALB and NLB keep their own target lists, managed by the EKS
+Auto Mode load balancer controller. Every pod, in every phase, mounts the same EFS volume at
+`/data` read-write and has its own `app.ini` on a per-pod volume.
 
-Every connection is covered. One that arrives before the load balancers stop routing to an old
-pod is served by it, because the pod keeps running through the 60-second pause. One already in
-progress when shutdown starts is finished by Gitea while the load balancer holds it open. One
-that arrives later goes to the two ready pods. The only gap: a single clone or push longer than
-5 minutes would be cut when the old pod exits; raising the drain and shutdown limits closes it.
+**Phase 0, steady state.** A and B are Running and Ready. Both are in the Service endpoints and
+are healthy targets in the ALB (HTTP, port 3000, checked on `/api/healthz` every 15 s) and the
+NLB (SSH, port 2222, TCP check every 10 s). Both serve web, API and git over HTTP and SSH with
+the same SSH host key.
+
+**Phase 1, merge.** The PR's `gitea_version` change reaches the cluster as a new image tag in the
+Deployment. Kubernetes creates C (`maxSurge: 1`: 3 pods is allowed during an upgrade). A and B
+keep serving everything; nothing about them changes.
+
+**Phase 2, C initializes.** C's init containers run in order, before Gitea itself:
+`init-directories` (folders on `/data`), `init-app-ini` (writes C's own `app.ini` from the
+values and secrets) and `configure-gitea` (`gitea migrate`, then the admin user). On a minor or
+major upgrade, `gitea migrate` updates the database tables here; A and B keep working on the
+updated tables. C has no traffic: it isn't Ready, so it isn't in the endpoints, and the load
+balancers haven't marked it healthy.
+
+**Phase 3, C starts serving, privately.** Gitea starts in C, listening on 3000 (HTTP) and 2222
+(SSH) with the shared host key. The controller has registered C's IP in the ALB and NLB target
+groups; their health checks run against it. Kubernetes' readiness probe (`GET /api/v1/version`
+every 10 s) passes. C is still not Ready, because of its two readiness gates, one per target
+group, which only turn true once the ALB check (2 passes, about 30 s) and the NLB check (3
+passes, about 30 s) succeed. The liveness probe (TCP, starting after 200 s) only restarts a
+hung pod and plays no part in traffic.
+
+**Phase 4, C is Ready.** Both gates are true, so C is Ready: it joins the Service endpoints and
+the load balancers send it new connections alongside A and B. Three pods serve.
+
+**Phase 5, A is told to stop.** With C Ready, Kubernetes may remove an old pod and still have 2
+Ready (`maxUnavailable: 0`). A is marked Terminating: it leaves the Service endpoints at once,
+and the controller starts deregistering it from the ALB and NLB (about 15 s or more to start).
+A deregistered target is "draining": it gets no new connections, but its open connections are
+kept for up to 300 s. Meanwhile A runs its preStop step, a 60 s pause, during which Gitea keeps
+running normally, so any connection that still reaches A in that window is served.
+
+**Phase 6, A shuts down.** After 60 s, Kubernetes sends Gitea in A the stop signal. Gitea stops
+accepting new work and finishes what is open (page loads, clones, pushes, SSH sessions) for up to
+300 s (`GRACEFUL_HAMMER_TIME`), then exits. Kubernetes force-kills only after 360 s
+(`terminationGracePeriodSeconds`, counted from phase 5), which covers the 60 s pause plus the
+300 s of shutdown. The load balancers' 300 s drain keeps those connections open on their side for
+the same time.
+
+**Phase 7, B is replaced.** Kubernetes creates D and repeats phases 2 to 6 with B. When D is
+Ready and B has exited, C and D run the new version and the upgrade is done. At no point did
+fewer than 2 pods serve.
+
+Every connection is covered. One that reaches an old pod before the load balancers stop routing
+to it is served, because the pod keeps running through the 60 s pause. One already open when
+shutdown starts is finished by Gitea while the load balancer holds it. One that arrives later
+goes to the Ready pods. The gap: a single clone or push longer than 5 minutes is cut when its pod
+exits; raising the drain and shutdown limits closes it.
 
 From merge to finished rollout takes about 3.5 minutes.
 
@@ -162,6 +189,41 @@ NLB takes a while longer. A 15-second pause dropped one SSH connection in testin
 
 To roll back, don't lower the version: Gitea can't run on tables that a newer version changed.
 Restore the database with RDS point-in-time recovery to a minute before the upgrade.
+
+## Where we differ from the stock Gitea chart
+
+We use the official chart (`gitea-charts/gitea` 12.7.0) unchanged and set values for it in
+`helmfile/values/gitea.yaml.gotmpl`, plus one patch Helmfile applies after rendering. Everything
+else in `helmfile/` is our own: two small charts (`gitea-cluster`, `gitea-config`) and External
+Secrets.
+
+| Setting | Stock chart | Ours | Why |
+| --- | --- | --- | --- |
+| `replicaCount` | 1 | 2 (`helmfile/env/sandbox.yaml`) | One pod always serves while the other is replaced |
+| `strategy.rollingUpdate.maxSurge` | 100% | 1 | Add one new pod at a time |
+| `strategy.rollingUpdate.maxUnavailable` | 0 | 0 (set explicitly) | Never fewer Ready pods than `replicaCount` |
+| `podDisruptionBudget` | none | `minAvailable: 1` | Node replacements can't evict both pods at once |
+| `topologySpreadConstraints` | none | prefer different AZs | Losing one AZ usually leaves a pod |
+| `persistence` | creates a 10 Gi ReadWriteOnce claim | our ReadWriteMany EFS claim (`create: false`) | Both pods share the repos |
+| `extraVolumes`, `extraInitVolumeMounts`, `extraContainerVolumeMounts` | none | SSH host key secret; per-pod emptyDir over `/data/gitea/conf` | Shared SSH identity; no shared `app.ini` |
+| `gitea.readinessProbe` | TCP on the HTTP port | `GET /api/v1/version` | Catches a pod that serves but isn't working |
+| `deployment.terminationGracePeriodSeconds` | 60 | 360 | Room for the 60 s pause and 300 s graceful shutdown |
+| `service.ssh` | ClusterIP | LoadBalancer on the Auto Mode NLB, 300 s drain | SSH from outside, finished on a leaving pod |
+| `service.http` | ClusterIP | ClusterIP (unchanged), reached through the Ingress | |
+| `ingress` | off | on, Auto Mode ALB, `/api/healthz` check, 3 failures to mark unhealthy, 300 s drain | Web and git over HTTP from outside |
+| `postgresql-ha` | on | off; RDS PostgreSQL | Data outside the cluster |
+| `valkey-cluster` | on | off; ElastiCache Valkey | Same |
+| `test` | on | off | No chart test pod |
+| `podSecurityContext`, `containerSecurityContext` | empty | non-root uid 1000, no privilege escalation, all capabilities dropped | Hardening |
+| `resources` | none | 250m CPU and 512 Mi requested, 1 Gi memory limit | Predictable scheduling |
+| `image.tag` | the chart's app version (1.27.0 for 12.7.0) | `gitea_version` from `aws/main.tf` (registry, rootless and `IfNotPresent` stay as stock) | The version is chosen in one place, by PR |
+| `gitea.admin` | username and a fixed password written in the chart's values | from the `gitea-admin` Secret (External Secrets, random password), kept in sync | No password in Git, and none shared with every other install |
+| `gitea.additionalConfigSources` | none | `gitea-app-ini-secrets` (database password, Valkey URLs, metrics token, the four signing keys) | Secrets stay out of Git and out of state |
+| `gitea.config` | defaults | database on RDS with TLS; cache, session, queue and global lock on Valkey; issue indexer `db`, repo indexer off; built-in SSH server on 2222 with the shared host key; `PUBLIC_URL_DETECTION: auto`; registration off; 300 s graceful shutdown | Two pods share all state; no domain |
+| Pod lifecycle | no preStop | `preStop: sleep 60`, added by a Helmfile `strategicMergePatches` (the chart has no value for it) | Load balancers stop routing before Gitea stops |
+
+Outside the chart, one namespace label enables Auto Mode's readiness gates
+(`eks.amazonaws.com/pod-readiness-gate-inject: enabled`, in `charts/gitea-cluster`).
 
 ## How we know it works
 
