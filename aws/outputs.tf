@@ -14,11 +14,8 @@ output "kubeconfig_command" {
 output "helmfile_values" {
   description = "Everything Helmfile needs from AWS (helmfile/values/tofu-outputs.yaml.gotmpl reads it with terragrunt output). Names, endpoints and ARNs only, no secret values"
   value = {
-    region       = local.region
-    cluster_name = module.eks.cluster_name
-
+    region        = local.region
     allowed_cidrs = local.allowed_cidrs
-    vpc_id        = module.vpc.vpc_id
 
     # Data stores
     rds_endpoint      = module.rds.db_instance_endpoint # host:port
@@ -29,7 +26,7 @@ output "helmfile_values" {
     secret_names         = { for k, s in data.aws_secretsmanager_secret.this : k => s.name }
     gitea_admin_username = local.gitea_admin_username
 
-    # Gitea version to deploy (main.tf locals); the chart adds "-rootless"
+    # Gitea version to deploy (main.tf locals); Helmfile adds "-rootless"
     gitea_image_tag = local.gitea_version
   }
 }

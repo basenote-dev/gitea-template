@@ -5,7 +5,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 6.44"
+      version = "~> 6.44"
     }
     github = {
       source  = "integrations/github"
@@ -13,11 +13,11 @@ terraform {
     }
     random = {
       source  = "hashicorp/random"
-      version = ">= 3.7"
+      version = "~> 3.7"
     }
     tls = {
       source  = "hashicorp/tls"
-      version = ">= 4.1" # ephemeral tls_private_key
+      version = "~> 4.1" # ephemeral tls_private_key
     }
   }
 }

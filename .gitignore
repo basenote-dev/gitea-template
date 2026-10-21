@@ -16,3 +16,5 @@ encryption.tf
 *.pem
 kubeconfig*
 .DS_Store
+# scripts/zero-downtime-upgrade-healthcheck.sh results
+zero-downtime-healthcheck-*.log

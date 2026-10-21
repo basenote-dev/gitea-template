@@ -1,9 +1,9 @@
 ################################################################################
-# Terraform State
+# State Bucket
 ################################################################################
 
 output "state_bucket" {
-  description = "S3 bucket holding the OpenTofu state of every root in this account"
+  description = "S3 bucket holding the OpenTofu state of both units"
   value       = module.state_bucket.s3_bucket_id
 }
 
@@ -49,7 +49,7 @@ output "github_environments" {
 ################################################################################
 
 output "platform_eks_admin_role_arn" {
-  description = "Role humans assume for cluster admin access (granted by the account stack)"
+  description = "Role people assume for cluster admin access (granted by the gitea unit)"
   value       = module.platform_eks_admin_role.arn
 }
 
