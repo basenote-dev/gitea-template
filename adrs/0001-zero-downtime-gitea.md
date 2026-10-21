@@ -55,6 +55,21 @@ one pod can run, so an upgrade has to stop it before starting the new one (Kuber
 mount and write at once (Kubernetes calls this ReadWriteMany). Both pods mount the same EFS
 volume and share one copy of every repo.
 
+We tested both ways EBS could be shared on this cluster (2026-10-21):
+
+- A volume requested as shared (ReadWriteMany): AWS refuses to create it. `ProvisioningFailed:
+  rpc error: code = InvalidArgument desc = Volume capabilities not supported`.
+- A normal EBS volume used by two pods on two nodes: the first pod runs, the second never starts.
+  `FailedAttachVolume: Volume is already used by pod(s) two-pods-rwo-...`.
+
+ReadWriteOnce means one node, not one pod, so two pods on the same node can share an EBS volume,
+but then that one node is a single point of failure. EBS io1/io2 Multi-Attach only works inside
+one AZ and as a raw block device, which needs a cluster filesystem on top. EBS volumes also live
+in one AZ, so a pod in another AZ can't use them at all. Gitea's HA guide asks for "a RWX
+file-system which can be shared among the deployment-based replica pods"; on AWS that is EFS
+(managed NFS across AZs, no servers to run) or FSx for NetApp ONTAP (faster, more expensive), or
+an NFS or Ceph cluster you run yourself.
+
 Side benefits: the repos live outside the cluster, so rebuilding EKS loses nothing, and AWS
 Backup copies the volume daily. The cost is speed: EFS is slower than a local disk for very
 large repos.
