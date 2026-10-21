@@ -10,6 +10,8 @@ crash.log
 backend.tf
 provider.tf
 encryption.tf
+# Terragrunt copies aws/.terraform.lock.hcl here after each run; aws/ holds the real one
+bootstrap/gitea/.terraform.lock.hcl
 # Local env / secrets
 .envrc
 .env
