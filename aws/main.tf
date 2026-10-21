@@ -63,10 +63,10 @@ locals {
   # out, which looks like a Gitea outage. m7g.large is the smallest current Graviton m class.
   postgres_version  = "17"
   db_instance_class = "db.m7g.large"
-  # A standby in a second AZ. Maintenance, instance class changes and failures fail over to it
-  # in about a minute instead of taking the database offline (a single-AZ resize was ~2.5 min
-  # of downtime in testing). Roughly doubles the RDS cost.
-  db_multi_az            = true
+  # Single AZ for the sandbox. Gitea upgrades never touch the database, so this doesn't affect
+  # them; AWS maintenance and failures do take it offline for a few minutes. Production would
+  # set true: a standby in a second AZ cuts that to ~40 s, for about double the RDS cost.
+  db_multi_az            = false
   db_deletion_protection = false # also skips the final snapshot, so destroy leaves a clean account
   valkey_version         = "8.2"
   cache_node_type        = "cache.m7g.large"
