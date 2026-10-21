@@ -87,10 +87,8 @@ releases:
         groupName: {{ .Environment.Name | quote }}
         inboundCidrs: {{ .Values.allowed_cidrs | toJson }}
 
-  # Gitea's wiring to AWS: secrets (via ESO) and the shared EFS claim. Also the upgrade gate: when
-  # the Gitea version changes, its pre-upgrade hook refuses a downgrade and, on a minor/major
-  # bump, runs `gitea migrate` with the new image. Helmfile upgrades this release before the gitea
-  # release (needs), so the schema is migrated before any pod rolls.
+  # Gitea's wiring to AWS: secrets (via ESO) and the shared EFS claim. Installed before the gitea
+  # release (needs), so the secrets and the volume exist when its pods start.
   - name: gitea-config
     namespace: gitea
     chart: ./charts/gitea-config
@@ -103,9 +101,6 @@ releases:
         adminUser: {{ .Values.gitea_admin_username | quote }}
         secretNames:
 {{ .Values.secret_names | toYaml | indent 10 }}
-        gitea:
-          image: "docker.gitea.com/gitea:{{ $giteaTag }}-rootless"
-          version: {{ $giteaTag | quote }}
 
   - name: gitea
     namespace: gitea

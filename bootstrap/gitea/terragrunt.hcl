@@ -80,8 +80,6 @@ terraform {
     if          = local.cluster_exists
   }
 
-  # A Gitea minor/major bump runs its migration Job before the pods roll
-  # (helmfile/charts/gitea-config/templates/gitea-upgrade.yaml).
   after_hook "helmfile_apply" {
     commands    = ["apply"]
     execute     = concat(local.helmfile, ["apply", "--suppress-secrets", "--skip-diff-on-install"])
