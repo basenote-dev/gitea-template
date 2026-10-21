@@ -15,12 +15,12 @@
 #   sandbox-apply (main only)  -> github-apply (AdministratorAccess)
 # Each IAM role trusts only its own environment, so a branch can never get write access. There
 # are no static AWS keys anywhere.
-name: Gitea deploy
+name: Gitea Deploy
 # What each run shows in the Actions list: the PR or commit it is for, or who started it.
 run-name: >-
-  ${{ github.event_name == 'pull_request' && format('Plan · #{0} {1}', github.event.pull_request.number, github.event.pull_request.title)
-  || github.event_name == 'push' && format('Deploy · {0}', github.event.head_commit.message)
-  || format('Manual {0} · started by {1}', inputs.action, github.actor) }}
+  ${{ github.event_name == 'pull_request' && format('OpenTofu Plan · #{0} {1}', github.event.pull_request.number, github.event.pull_request.title)
+  || github.event_name == 'push' && format('OpenTofu Apply · {0}', github.event.head_commit.message)
+  || format('OpenTofu {0} (Manual) · started by {1}', inputs.action == 'apply' && 'Apply' || inputs.action == 'destroy' && 'Destroy' || 'Plan', github.actor) }}
 
 on:
   pull_request:
@@ -50,7 +50,7 @@ env:
 # fresh clone, or the template) pushes and pull requests run nothing.
 jobs:
   plan:
-    name: Plan
+    name: OpenTofu Plan + Helm Diff
     if: >-
       vars.BOOTSTRAPPED == 'true' && (
         github.event_name == 'pull_request' ||
@@ -69,22 +69,24 @@ jobs:
       id-token: write       # OIDC
       pull-requests: write  # plan comment
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
+      - name: Check Out Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
         with:
           persist-credentials: false
 
-      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
+      - name: Install Pinned Tools (OpenTofu, Terragrunt, Helm, Helmfile, kubectl)
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
         with:
           install: true
           cache: true
 
-      - name: Log in to AWS as github-plan (read-only)
+      - name: Assume AWS Role github-plan via OIDC (Read-Only)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Plan (OpenTofu plan and Helm diff)
+      - name: Run OpenTofu Plan and Helm Diff, Post PR Comment
         uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
         env:
           GITHUB_TOKEN: ${{ github.token }} # the action posts the comment with it
@@ -94,7 +96,7 @@ jobs:
           github_token: ${{ github.token }}
 
   apply:
-    name: Deploy
+    name: OpenTofu Apply + Helm Upgrade
     if: >-
       vars.BOOTSTRAPPED == 'true' && (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -113,29 +115,31 @@ jobs:
     env:
       ACCOUNT: sandbox
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
+      - name: Check Out Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
         with:
           persist-credentials: false
 
-      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
+      - name: Install Pinned Tools (OpenTofu, Terragrunt, Helm, Helmfile, kubectl)
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
         with:
           install: true
           cache: true
 
-      - name: Log in to AWS as github-apply
+      - name: Assume AWS Role github-apply via OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-duration-seconds: 7200 # EKS and RDS creation can take over an hour
 
-      - name: Deploy (OpenTofu apply, then Helmfile)
+      - name: Run OpenTofu Apply, Then Helmfile Apply
         uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
         with:
           tg_command: run --all apply --working-dir bootstrap
           github_token: ${{ github.token }}
 
-      - name: Show the Gitea URL
+      - name: Write Gitea URL to Job Summary
         run: |
           lb=$(kubectl --context gitea-sandbox --namespace gitea get ingress gitea --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
           {
@@ -145,7 +149,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   destroy:
-    name: Destroy
+    name: Helm Uninstall + OpenTofu Destroy
     if: vars.BOOTSTRAPPED == 'true' && github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -157,16 +161,18 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
+      - name: Check Out Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
         with:
           persist-credentials: false
 
-      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
+      - name: Install Pinned Tools (OpenTofu, Terragrunt, Helm, Helmfile, kubectl)
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
         with:
           install: true
           cache: true
 
-      - name: Log in to AWS as github-apply
+      - name: Assume AWS Role github-apply via OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
@@ -175,7 +181,7 @@ jobs:
 
       # The stack's hooks uninstall the Helm releases (waiting for the load balancers to go) before
       # OpenTofu destroys the stack. state/ is never destroyed.
-      - name: Destroy (Helm releases, then OpenTofu)
+      - name: Uninstall Helm Releases, Then Run OpenTofu Destroy
         uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
         with:
           tg_command: run --all destroy --working-dir bootstrap
