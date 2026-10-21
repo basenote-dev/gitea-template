@@ -106,6 +106,8 @@ ingress:
     # No domain, so no certificate: plain HTTP on the load balancer's own hostname.
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
     alb.ingress.kubernetes.io/healthcheck-path: /api/healthz
+    # Gitea's HA guide: take a pod out after three failed checks.
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
     alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=300
   hosts:
     # Empty host: the rule matches the load balancer's own name.
