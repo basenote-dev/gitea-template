@@ -5,7 +5,7 @@ OpenTofu, Terragrunt and Helmfile.
 
 ```
 aws/         OpenTofu: VPC, EKS, RDS, Valkey, EFS
-helmfile/    everything inside the cluster (Gitea, External Secrets, node pool)
+helmfile/    everything inside the cluster (Gitea, External Secrets)
 bootstrap/   Terragrunt config that ties it together, plus the one-time state/ setup
 .mise.toml   pinned tool versions (mise install)
 modules/     vendored terraform-aws-modules

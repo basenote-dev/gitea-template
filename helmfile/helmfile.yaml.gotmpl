@@ -45,27 +45,12 @@ repositories:
     url: https://charts.external-secrets.io
 
 releases:
-  # Node capacity for everything below (on-demand Graviton, sized in env/sandbox.yaml). Must exist first.
-  - name: node-pools
-    namespace: default
-    chart: ./charts/node-pools
-    values:
-      - instanceSizes: {{ .Values.nodePool.instanceSizes | toJson }}
-        cpuLimit: {{ .Values.nodePool.cpuLimit | quote }}
-        memoryLimit: {{ .Values.nodePool.memoryLimit | quote }}
-        nodeRoleName: {{ .Values.node_iam_role_name | quote }}
-        subnetIds: {{ .Values.node_subnet_ids | toJson }}
-        securityGroupId: {{ .Values.node_security_group_id | quote }}
-        tags: {{ .Values.resource_tags | toJson }}
-
   # Syncs AWS Secrets Manager -> Kubernetes Secrets, using its Pod Identity role from OpenTofu.
   - name: external-secrets
     namespace: external-secrets
     createNamespace: true
     chart: external-secrets/external-secrets
     version: 2.13.0
-    needs:
-      - default/node-pools
     values:
       - values/external-secrets.yaml
       - image: {{ $eso | toJson }}
@@ -80,8 +65,6 @@ releases:
   - name: gitea-cluster
     namespace: default
     chart: ./charts/gitea-cluster
-    needs:
-      - default/node-pools
     values:
       - efsVolumeHandle: {{ .Values.efs_volume_handle | quote }}
         groupName: {{ .Environment.Name | quote }}

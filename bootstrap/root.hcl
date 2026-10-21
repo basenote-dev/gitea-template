@@ -71,7 +71,8 @@ remote_state {
 ################################################################################
 # Region and account come from account.hcl (the caller's own credentials). With
 # EXPECTED_ACCOUNT_ID set, allowed_account_ids makes OpenTofu refuse credentials for any other
-# account. Every resource gets the account's cost-allocation tags through default_tags.
+# account. Every resource OpenTofu creates gets the account's cost-allocation tags through
+# default_tags (Auto Mode's EC2 nodes don't: AWS launches those itself).
 
 generate "provider" {
   path      = "provider.tf"

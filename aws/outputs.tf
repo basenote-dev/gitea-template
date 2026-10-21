@@ -29,12 +29,6 @@ output "helmfile_values" {
     secret_names         = { for k, s in data.aws_secretsmanager_secret.this : k => s.name }
     gitea_admin_username = local.gitea_admin_username
 
-    # The tagged Auto Mode NodeClass (helmfile/charts/node-pools)
-    node_iam_role_name     = module.eks.node_iam_role_name
-    node_subnet_ids        = module.vpc.private_subnets
-    node_security_group_id = module.eks.cluster_primary_security_group_id
-    resource_tags          = local.tags
-
     # Gitea version to deploy (main.tf locals); the chart adds "-rootless"
     gitea_image_tag = local.gitea_version
   }

@@ -16,11 +16,6 @@ podDisruptionBudget:
 
 # image: set in helmfile.yaml.gotmpl (tag from gitea_version in aws/main.tf).
 
-# Run on our tagged Graviton pool (helmfile/charts/node-pools), never on Auto Mode's built-in
-# general-purpose pool, so node cost carries the melange-industries tags and uses arm64.
-nodeSelector:
-  karpenter.sh/nodepool: workloads
-
 # Prefer replicas in different AZs, so losing one zone usually leaves a pod running. Preferred,
 # not required (ScheduleAnyway): with too few nodes both pods still start.
 topologySpreadConstraints:

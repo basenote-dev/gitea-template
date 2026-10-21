@@ -5,10 +5,6 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 data "aws_region" "current" {}
 
-# The provider's default_tags (account.hcl): on every resource below, and copied onto Auto Mode
-# nodes by Helmfile.
-data "aws_default_tags" "current" {}
-
 data "aws_availability_zones" "available" {
   # Exclude Local Zones
   filter {
@@ -85,9 +81,6 @@ locals {
 
   log_retention_days       = 30 # EKS control plane, Container Insights, VPC flow logs, RDS
   db_backup_retention_days = 7  # RDS point-in-time recovery window
-
-  # Cost-allocation tags from the generated provider (account.hcl).
-  tags = data.aws_default_tags.current.tags
 }
 
 ################################################################################
@@ -155,8 +148,8 @@ module "eks" {
   # authenticated by IAM and authorized by the access entries below.
   endpoint_public_access = true
 
-  # Both built-in pools stay on: "system" for critical add-ons, "general-purpose" for the add-on
-  # pods OpenTofu waits on (EFS CSI, CloudWatch), which can't wait for Helmfile's tagged pool.
+  # Auto Mode's built-in pools: "system" for critical add-ons, "general-purpose" for everything
+  # else, Gitea included.
   compute_config = {
     enabled    = true
     node_pools = ["general-purpose", "system"]
