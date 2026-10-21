@@ -16,6 +16,9 @@ modules/     vendored terraform-aws-modules
 
 - Admin AWS credentials for an empty AWS account in your shell (`aws sts get-caller-identity`).
 - The AWS CLI, git and [mise](https://mise.jdx.dev). For method 2 also `gh`.
+- If the account already has a GitHub OIDC provider from another project, set
+  `USE_EXISTING_GITHUB_OIDC_PROVIDER=true`. AWS allows only one, and we reuse it without
+  managing it. Check with `aws iam list-open-id-connect-providers`.
 
 ## Method 1: everything from your laptop
 

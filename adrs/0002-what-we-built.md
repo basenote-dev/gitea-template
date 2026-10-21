@@ -17,6 +17,7 @@ piece we wrote or changed on top.
 | State bucket adopted with an `import` block | Terragrunt creates the empty bucket, then this unit manages it (versioning, encryption, TLS-only) | The bucket must exist before any state can be written | No | No |
 | State KMS key, `prevent_destroy`, optional `EXISTING_STATE_KMS_KEY_ID` import | Encrypts the gitea unit's state and plan files; never destroyed by OpenTofu | Secrets and endpoints in state are ciphertext; a teardown doesn't destroy the key | No | The import variable, if keys are never reused |
 | GitHub OIDC roles with a hand-written trust policy | `github-plan` (read-only, any branch) and `github-apply` (admin, `main` only), each trusting one environment of this repo by its numeric IDs | The module's built-in option checks `aud` loosely and can race the provider | No | No |
+| `USE_EXISTING_GITHUB_OIDC_PROVIDER` switch | Roles trust the account's existing GitHub OIDC provider instead of creating one | AWS allows one per account, and a second account we tested already had one from another project | No | No |
 | `platform-eks-admin` role | The role people assume for `kubectl` | The cluster's access entries never reference anyone's SSO role | No | No |
 | Secrets with random, write-only values (`gitea/db`, `valkey`, `admin`, `metrics`) | Generated once, never in state or plan output | Passwords stay out of Git and state | No | No |
 | `gitea/ssh-host-key` (ephemeral ed25519 key) | One SSH host key for every pod | Two pods with different keys make SSH refuse every other connection (seen in testing) | Yes | No |

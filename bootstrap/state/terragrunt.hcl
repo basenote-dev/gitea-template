@@ -39,4 +39,8 @@ inputs = {
   # Set EXISTING_STATE_KMS_KEY_ID once to adopt a state key kept from an earlier build of this
   # account (the key and its alias are then in state). Unset, a new key is created.
   existing_state_kms_key_id = get_env("EXISTING_STATE_KMS_KEY_ID", "") == "" ? null : get_env("EXISTING_STATE_KMS_KEY_ID")
+
+  # Set USE_EXISTING_GITHUB_OIDC_PROVIDER=true when the account already has a GitHub OIDC
+  # provider from another project. AWS allows only one.
+  use_existing_github_oidc_provider = get_env("USE_EXISTING_GITHUB_OIDC_PROVIDER", "false") == "true"
 }
