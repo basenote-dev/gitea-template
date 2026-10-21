@@ -45,7 +45,7 @@ GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-boo
 1. This runs only `state/`. With `GITHUB_TOKEN` set it also sets up GitHub: the OIDC trust,
    the environments `sandbox-plan` (read-only role, any branch) and `sandbox-apply` (admin role,
    `main` only), and the repository variable `BOOTSTRAPPED`. No AWS keys are stored in GitHub.
-2. Start the first deploy: Actions -> terragrunt -> Run workflow -> `apply`, or push to `main`.
+2. Start the first deploy: Actions -> Gitea deploy -> Run workflow -> `apply`, or push to `main`.
 3. After that, every pull request gets a plan comment (OpenTofu plan and Helm diff), and every
    merge to `main` applies it.
 
@@ -53,7 +53,7 @@ The workflow does nothing in a repository without `BOOTSTRAPPED` (a fresh clone,
 template), so pushing before the bootstrap is harmless. Deleting the variable turns CI off
 again; running the bootstrap sets it back.
 
-Tear down with Actions -> terragrunt -> Run workflow -> `destroy` (keeps `state/`).
+Tear down with Actions -> Gitea deploy -> Run workflow -> `destroy` (keeps `state/`).
 
 ## Watch a zero-downtime upgrade
 
