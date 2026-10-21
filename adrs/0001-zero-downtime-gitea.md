@@ -22,6 +22,10 @@ So Gitea runs as 2 pods. That is the minimum: one pod is always serving while th
 swapped. Gitea's own HA guide says the same ("at least two application nodes"). A third pod
 would add cost and change nothing about upgrades.
 
+The two pods are identical: same image, same config, no special roles. The load balancers spread
+requests across both, so one request can land on pod A and the next on pod B. To a user they are
+one Gitea; the second copy exists so one is always left while the other is replaced.
+
 Two pods only work if they behave like one Gitea. Whatever one pod knows, the other must know
 too, and a new pod must start with all of it. Gitea keeps five kinds of state, and each one
 lives outside the pods:
@@ -70,6 +74,30 @@ and SSH would refuse to connect ("REMOTE HOST IDENTIFICATION HAS CHANGED"). We s
 in testing: the two pods started at the same moment and each made its own key. The key is now
 made once, kept in Secrets Manager and mounted into every pod. It also survives cluster rebuilds,
 so users' `known_hosts` keep working.
+
+## What we added on top of a plain Gitea install
+
+A plain Gitea install on Kubernetes is one pod on a private disk. Every row below is a change
+from that, and each one closes a specific gap.
+
+| Setting | Where | What it does | Without it |
+| --- | --- | --- | --- |
+| `replicas: 2` | `helmfile/env/sandbox.yaml` | Runs two copies of Gitea | One copy, so replacing it leaves a gap |
+| Shared EFS volume (ReadWriteMany) | `aws/main.tf`, `helmfile/charts/gitea-cluster` | Both copies read and write the same repos | Each copy would need its own disk, and an EBS disk can't be shared |
+| Valkey for cache, sessions, queues and locks | `aws/main.tf`, `helmfile/charts/gitea-config` | Both copies share logins and background work | A user logged in on one pod looks logged out on the other; jobs run twice |
+| Database issue indexer | `helmfile/values/gitea.yaml.gotmpl` | Search works with two copies | Gitea's default index (bleve) can only be opened by one copy |
+| One SSH host key from Secrets Manager | `bootstrap/state`, `helmfile/charts/gitea-config` | Both copies show SSH clients the same identity | SSH refuses every other connection |
+| `maxSurge: 1` | `helmfile/values/gitea.yaml.gotmpl` | During an upgrade Kubernetes may run one extra pod (3 in total), so it starts the new pod before stopping an old one | Kubernetes could stop an old pod first |
+| `maxUnavailable: 0` | same file | Never fewer than 2 ready pods during an upgrade | Kubernetes could drop to 1 ready pod, or none |
+| Disruption budget, `minAvailable: 1` | same file | Covers everything that isn't an upgrade: when AWS replaces or empties a node, Kubernetes won't evict a pod if that would leave none running | A node replacement could stop both pods at once |
+| Readiness gates | `helmfile/charts/gitea-cluster/templates/namespace.yaml` | A new pod counts as ready only once the ALB and NLB send it traffic | Kubernetes could stop an old pod while the load balancers still can't reach the new one |
+| 60 s pause before a pod stops (preStop) | `helmfile/helmfile.yaml.gotmpl` | A stopping pod keeps serving while the load balancers move traffic off it | New connections still arriving get refused (a 15 s pause dropped one SSH connection in testing) |
+| 300 s load balancer drain | `helmfile/values/gitea.yaml.gotmpl` | Connections already open to a leaving pod are allowed to finish | Long clones and pushes get cut |
+| 300 s Gitea graceful shutdown, 360 s before Kubernetes force-kills | same file | Gitea finishes open requests before it exits | Gitea is killed mid-request |
+
+`maxSurge` and `maxUnavailable` decide how an upgrade swaps pods. The disruption budget is a
+separate guard for the times AWS moves pods around on its own, like when Auto Mode replaces a
+node.
 
 ## What happens during an upgrade
 
