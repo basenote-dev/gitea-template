@@ -57,11 +57,10 @@ locals {
   }
   gitea_admin_username = "gitea_admin"
 
-  # The Gitea version this account runs (docker.gitea.com/gitea:<version>-rootless).
-  # Helmfile deploys it (helmfile_values.gitea_image_tag). Bump one step at a time:
-  #   patch (1.26.3 -> 1.26.4): plain rolling update.
-  #   minor/major (1.26 -> 1.27, 1.27 -> 28): a `gitea migrate` Job runs before the pods roll
-  #   (helmfile/charts/gitea-config). Downgrades are refused.
+  # The Gitea version this account runs (docker.gitea.com/gitea:<version>-rootless); Helmfile
+  # deploys it. Upgrade one release at a time. The pods roll one by one, and the first new pod
+  # updates the database tables when it starts. Never go back down (Gitea can't run on tables a
+  # newer version changed); restore the database with RDS point-in-time recovery instead.
   gitea_version = "1.26.3"
 
   # No burstable (t) classes: they run on CPU credits and slow to a crawl when the credits run
