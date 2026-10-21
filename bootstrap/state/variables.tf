@@ -12,6 +12,12 @@ variable "github_repository" {
   }
 }
 
+variable "use_existing_github_oidc_provider" {
+  description = "Trust the account's existing GitHub OIDC provider instead of creating one (terragrunt.hcl reads USE_EXISTING_GITHUB_OIDC_PROVIDER). For accounts where another project already made it."
+  type        = bool
+  default     = false
+}
+
 variable "manage_github" {
   description = "Create the GitHub side (environments, AWS_ROLE_ARN variables, BOOTSTRAPPED) and look up the repo's IDs. Needs GITHUB_TOKEN with admin on the repo. Off for a laptop-only deploy with no pipeline."
   type        = bool

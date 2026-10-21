@@ -32,6 +32,10 @@ locals {
   github_plan_environment  = "${local.account}-plan"
   github_apply_environment = "${local.account}-apply"
   github_apply_branch      = "main"
+  github_oidc_provider_arn = (var.use_existing_github_oidc_provider
+    ? "arn:aws:iam::${local.account_id}:oidc-provider/${local.github_oidc_host}"
+    : module.github_oidc_provider[0].arn
+  )
 
   # GitHub Actions OIDC subject prefixes that may assume the CI roles. Repos created after
   # 2026-07-15 send the immutable form (repo:owner@<owner-id>/name@<repo-id>); older ones the
@@ -153,11 +157,20 @@ import {
 # that option checks `aud` with ForAllValues (passes when the claim is missing) and doesn't
 # reference the provider resource, so the role could be created before the provider exists.
 
+# An account has only one provider per URL. If another project already made it, set
+# USE_EXISTING_GITHUB_OIDC_PROVIDER=true and the roles trust that one. We never manage or delete it.
 module "github_oidc_provider" {
   source = "../../modules/terraform-aws-iam/modules/iam-oidc-provider"
+  count  = var.use_existing_github_oidc_provider ? 0 : 1
 
   url            = "https://${local.github_oidc_host}"
   client_id_list = ["sts.amazonaws.com"]
+}
+
+# Older builds created the provider without count.
+moved {
+  from = module.github_oidc_provider
+  to   = module.github_oidc_provider[0]
 }
 
 # Plans run on any branch (via the sandbox-plan environment), so this role is read-only plus
@@ -174,7 +187,7 @@ module "github_plan_role" {
   trust_policy_permissions = {
     GitHubActions = {
       actions    = ["sts:AssumeRoleWithWebIdentity"]
-      principals = [{ type = "Federated", identifiers = [module.github_oidc_provider.arn] }]
+      principals = [{ type = "Federated", identifiers = [local.github_oidc_provider_arn] }]
       condition = [
         { test = "StringEquals", variable = "${local.github_oidc_host}:aud", values = ["sts.amazonaws.com"] },
         { test = "StringEquals", variable = "${local.github_oidc_host}:sub", values = [for p in local.github_oidc_sub_prefixes : "${p}:environment:${local.github_plan_environment}"] },
@@ -217,7 +230,7 @@ module "github_apply_role" {
   trust_policy_permissions = {
     GitHubActions = {
       actions    = ["sts:AssumeRoleWithWebIdentity"]
-      principals = [{ type = "Federated", identifiers = [module.github_oidc_provider.arn] }]
+      principals = [{ type = "Federated", identifiers = [local.github_oidc_provider_arn] }]
       condition = [
         { test = "StringEquals", variable = "${local.github_oidc_host}:aud", values = ["sts.amazonaws.com"] },
         { test = "StringEquals", variable = "${local.github_oidc_host}:sub", values = [for p in local.github_oidc_sub_prefixes : "${p}:environment:${local.github_apply_environment}"] },

@@ -23,7 +23,7 @@ output "state_kms_key_alias" {
 
 output "github_oidc_provider_arn" {
   description = "IAM OIDC provider for GitHub Actions tokens"
-  value       = module.github_oidc_provider.arn
+  value       = local.github_oidc_provider_arn
 }
 
 output "github_plan_role_arn" {
