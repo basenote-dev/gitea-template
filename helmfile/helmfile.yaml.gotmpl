@@ -1,12 +1,11 @@
 # Everything inside the cluster. OpenTofu builds the AWS side (aws/); this file installs the
 # Kubernetes side on top of it. Terragrunt runs it from hooks in bootstrap/gitea/terragrunt.hcl
-# (diff after plan, apply after apply, destroy before destroy);
-# by hand, from this directory:
+# (diff after plan, apply after apply, destroy before destroy). By hand, from this directory:
 #
 #   helmfile -e sandbox diff     # what would change ("helm plan")
 #   helmfile -e sandbox apply    # diff, then upgrade only what changed
 #
-# One Helmfile environment, sandbox. It reads its sizing from env/sandbox.yaml and its AWS values
+# One Helmfile environment, sandbox. It reads its settings from env/sandbox.yaml and its AWS values
 # (endpoints, secret names, Gitea version) straight from the stack's `helmfile_values` output
 # (values/tofu-outputs.yaml.gotmpl).
 #

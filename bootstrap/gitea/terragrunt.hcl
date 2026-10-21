@@ -36,7 +36,7 @@ locals {
 
   # Writes the cluster to ~/.kube/config as context gitea-sandbox. In CI the job's own role has
   # an EKS access entry (github-plan view, github-apply admin). On a laptop the caller is any
-  # admin in the account, so kubectl assumes platform-eks-admin (created by bootstrap, trusted by
+  # admin in the account, so kubectl assumes platform-eks-admin (created by state/, trusted by
   # the account) instead of needing its own access entry.
   kubeconfig = concat([
     "aws", "eks", "update-kubeconfig",

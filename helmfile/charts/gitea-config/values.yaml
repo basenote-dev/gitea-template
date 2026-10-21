@@ -1,5 +1,5 @@
 region: us-west-2
 valkeyEndpoint: ""      # host:port of the ElastiCache primary endpoint
 adminUser: gitea_admin
-secretNames: {}         # db, valkey, admin, metrics -> Secrets Manager secret names
+secretNames: {}         # db, valkey, admin, metrics, ssh_host_key -> Secrets Manager names
 refreshInterval: 1h

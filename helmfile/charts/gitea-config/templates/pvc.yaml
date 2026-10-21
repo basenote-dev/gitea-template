@@ -1,3 +1,4 @@
+# Gitea's claim on the shared EFS volume (charts/gitea-cluster); both pods mount it.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

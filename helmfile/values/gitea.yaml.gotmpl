@@ -1,10 +1,10 @@
 # Values for the official Gitea chart (https://gitea.com/gitea/helm-gitea).
-# Secrets never appear here: they come from the ESO-managed Secrets in charts/gitea-config.
+# Secrets never appear here: External Secrets creates them (charts/gitea-config).
 
 replicaCount: {{ .Values.gitea.replicas }}
 
-# Zero-downtime rollouts: start a new pod, wait until the ALB says it's healthy, then retire an
-# old one. This works because no pod holds state; RDS, Valkey and EFS hold all of it.
+# Zero-downtime rollouts: start a new pod, wait until the load balancers say it's healthy, then
+# retire an old one. This works because no pod holds state; RDS, Valkey and EFS hold all of it.
 strategy:
   type: RollingUpdate
   rollingUpdate:
@@ -130,7 +130,7 @@ gitea:
     passwordMode: keepUpdated
 
   metrics:
-    enabled: true # bearer token comes from the ESO-managed secret
+    enabled: true # bearer token comes from the gitea/metrics secret
 
   # Passwords, Valkey URL and metrics token, one key per app.ini section (charts/gitea-config).
   additionalConfigSources:

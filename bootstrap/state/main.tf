@@ -7,6 +7,7 @@ provider "github" {
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 data "github_user" "owner" {
   count    = var.manage_github ? 1 : 0
@@ -17,7 +18,6 @@ data "github_repository" "this" {
   count     = var.manage_github ? 1 : 0
   full_name = var.github_repository
 }
-data "aws_region" "current" {}
 
 locals {
   name    = "gitea"
@@ -62,9 +62,8 @@ locals {
 }
 
 ################################################################################
-# Terraform State
+# State Bucket
 ################################################################################
-
 # Both units keep their state here (root.hcl remote_state, S3 native lockfile).
 # `terragrunt apply --backend-bootstrap` creates the bucket before OpenTofu runs, so this unit's
 # own state lands in it too. The import block below adopts that bucket into the
@@ -103,12 +102,11 @@ import {
 ################################################################################
 # State Encryption Key
 ################################################################################
-
 # OpenTofu encrypts the gitea unit's state and plan files with a data key from this KMS key
 # (root.hcl looks it up by alias). This unit is the exception: it manages the key, so its own
 # state is only S3 server-side encrypted. It holds no secret values (secrets are write-only).
 # No key policy is set, so AWS applies the default one: it delegates to IAM, and role policies
-# decide who can use the key. This is the only customer managed key bootstrap creates (Secrets
+# decide who can use the key. This is the only customer managed key this unit creates (Secrets
 # Manager uses its AWS managed key).
 #
 # Plain resources instead of terraform-aws-kms: the key must carry `prevent_destroy`, and a
@@ -146,7 +144,6 @@ import {
 ################################################################################
 # GitHub OIDC
 ################################################################################
-
 # GitHub Actions trades its OIDC token for short-lived role credentials, so no AWS key is stored
 # in GitHub. Each role trusts exactly one GitHub environment of this repository. The subject
 # prefixes are built from the GitHub API (locals above): newer repos use the immutable
@@ -236,17 +233,16 @@ module "github_apply_role" {
 ################################################################################
 # Cluster Admin Role
 ################################################################################
-
-# Humans reach the cluster through this role instead of their own (often SSO) identities, so
+# People reach the cluster through this role instead of their own (often SSO) identities, so
 # the stack's EKS access entries never reference SSO role paths. Anyone in this account whose
-# IAM policy allows sts:AssumeRole on it can use it; the stack grants it cluster admin.
+# IAM policy allows sts:AssumeRole on it can use it; the gitea unit grants it cluster admin.
 
 module "platform_eks_admin_role" {
   source = "../../modules/terraform-aws-iam/modules/iam-role"
 
   name            = "platform-eks-admin"
   use_name_prefix = false
-  description     = "Human cluster admins (EKS access entry is granted by the account stack)"
+  description     = "Cluster admin for people (the gitea unit grants its EKS access entry)"
 
   trust_policy_permissions = {
     AccountRoot = {
@@ -267,7 +263,6 @@ module "platform_eks_admin_role" {
 ################################################################################
 # Application Secrets
 ################################################################################
-
 # Values are generated as ephemeral values and written with the write-only `secret_string_wo`
 # argument, so they never appear in plan output or state. The stack reads them back
 # ephemerally (RDS `password_wo`, Valkey `auth_token_wo`) and External Secrets copies them
@@ -316,7 +311,6 @@ module "ssh_host_key" {
 ################################################################################
 # GitHub Environments
 ################################################################################
-
 # The environments the two roles trust. Plans may run from any branch; applies only from main
 # (custom deployment branch policy). Each environment tells the workflow which role to assume
 # through the AWS_ROLE_ARN variable, so the workflow holds no account-specific values.
