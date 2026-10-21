@@ -13,7 +13,6 @@ Plain OpenTofu for every AWS resource Gitea runs on. There is no Terragrunt here
 | RDS | PostgreSQL 17, `db.m7g.large`, Multi-AZ (standby in a second AZ), no deletion protection |
 | ElastiCache Valkey | Valkey 8.2, one `cache.m7g.large` node, TLS and auth token |
 | EFS | Elastic throughput, mount targets in the private subnets, access point uid/gid 1000 at `/gitea`, AWS Backup |
-| Gitea Upgrade Snapshot | Manual RDS snapshot before each Gitea minor/major upgrade |
 
 Every setting is a local in `main.tf`. Passwords never pass through OpenTofu state: bootstrap
 creates the `gitea/*` secrets, and RDS and Valkey get theirs through write-only arguments.
