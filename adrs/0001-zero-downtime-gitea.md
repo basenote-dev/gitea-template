@@ -103,17 +103,35 @@ node.
 
 1. Someone changes `gitea_version` in `aws/main.tf` in a pull request. The PR shows the plan;
    merging it starts the deploy.
-2. Kubernetes starts one new pod with the new version (`maxSurge: 1`). Both old pods keep
-   serving.
-3. On a minor or major upgrade, the new pod updates the database tables before Gitea starts
-   (see "The database during an upgrade" below). The old pods keep serving while it does.
-4. The load balancers (an ALB for web and git over HTTP, an NLB for SSH) send the new pod traffic
-   only after it passes their health checks. Kubernetes waits for that too (readiness gates),
-   so it doesn't count the pod as ready before users can reach it.
-5. Kubernetes tells one old pod to stop. It keeps serving for 60 seconds while the load balancers
-   stop sending it new connections, then has up to 5 minutes to finish open clones and pushes.
-6. Steps 2 to 5 repeat for the second pod. At no point are both pods down (`maxUnavailable: 0`,
-   and a disruption budget that keeps at least 1 pod).
+2. Kubernetes creates a third pod with the new version (`maxSurge: 1` allows one extra pod
+   during an upgrade). The two old pods keep serving everything; the new pod gets no traffic
+   yet.
+3. The new pod starts like every Gitea pod: it updates the database tables if the version needs
+   it (see "The database during an upgrade" below), mounts the same EFS volume, loads the same
+   SSH host key and connects to RDS and Valkey. All three pods now share the same data.
+4. Kubernetes waits for the new pod's readiness probe to pass: Gitea answers and can reach the
+   database and cache. (The liveness probe is a different check that only restarts a pod that
+   hangs; it doesn't decide traffic.)
+5. The load balancer controller registers the new pod with the ALB (web and git over HTTP) and
+   the NLB (SSH). They run their own health checks and start sending it users only when those
+   pass. The readiness gate makes Kubernetes wait for that too, so the pod doesn't count as
+   ready until users can actually reach it.
+6. Kubernetes picks one old pod to stop. It may, because 2 ready pods remain
+   (`maxUnavailable: 0`). The pod is marked as terminating and the controller starts taking it
+   out of the load balancers, which takes about 15 seconds or more. The pod keeps running
+   normally for 60 seconds (the preStop pause), so anything that still reaches it is served.
+7. After those 60 seconds Gitea is told to shut down. It stops taking new work but finishes what
+   is in flight (page loads, clones, pushes) for up to 5 minutes.
+8. Meanwhile the load balancers drain that pod: they send it nothing new but keep its open
+   connections for up to 5 minutes instead of cutting them. A clone or push that started on the
+   old pod finishes on the old pod. Then the pod exits.
+9. Steps 2 to 8 repeat for the second old pod.
+
+Every connection is covered. One that arrives before the load balancers stop routing to an old
+pod is served by it, because the pod keeps running through the 60-second pause. One already in
+progress when shutdown starts is finished by Gitea while the load balancer holds it open. One
+that arrives later goes to the two ready pods. The only gap: a single clone or push longer than
+5 minutes would be cut when the old pod exits; raising the drain and shutdown limits closes it.
 
 From merge to finished rollout takes about 3.5 minutes.
 
