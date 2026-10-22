@@ -54,6 +54,28 @@ Run everything below from that folder.
 
 ## Method 1: everything from your laptop
 
+First, log in to the AWS account you're deploying to, as an admin. Use an SSO profile:
+
+```sh
+aws sso login --profile <your-aws-profile>
+export AWS_PROFILE=<your-aws-profile>
+```
+
+Or access keys:
+
+```sh
+export AWS_ACCESS_KEY_ID=<your-access-key-id>
+export AWS_SECRET_ACCESS_KEY=<your-secret-access-key>
+```
+
+Check that the account ID it prints is the one you want:
+
+```sh
+aws sts get-caller-identity
+```
+
+Then deploy:
+
 ```sh
 mise trust
 mise install
@@ -67,6 +89,35 @@ auto-approves each OpenTofu apply.
 To remove it, see [Tear down](#tear-down).
 
 ## Method 2: bootstrap from your laptop, then GitHub Actions deploys
+
+First, log in to the AWS account you're deploying to, as an admin. Use an SSO profile:
+
+```sh
+aws sso login --profile <your-aws-profile>
+export AWS_PROFILE=<your-aws-profile>
+```
+
+Or access keys:
+
+```sh
+export AWS_ACCESS_KEY_ID=<your-access-key-id>
+export AWS_SECRET_ACCESS_KEY=<your-secret-access-key>
+```
+
+Check that the account ID it prints is the one you want:
+
+```sh
+aws sts get-caller-identity
+```
+
+Also log in to GitHub. The bootstrap uses your token to create the repo's environments and
+variables, so it needs admin access to your repo:
+
+```sh
+gh auth login
+```
+
+Then bootstrap:
 
 ```sh
 mise trust
