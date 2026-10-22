@@ -15,7 +15,10 @@ modules/     vendored terraform-aws-modules
 ## Before you start
 
 - Admin AWS credentials for an empty AWS account in your shell (`aws sts get-caller-identity`).
-- The AWS CLI, git and [mise](https://mise.jdx.dev). For method 2 also `gh`.
+- The AWS CLI, git and [mise](https://mise.jdx.dev) installed. For method 2 also `gh`.
+- mise only reads a repo's `.mise.toml` after you trust it. Until then it prints
+  `mise WARN ... .mise.toml is not trusted` and installs nothing, so every method below runs
+  `mise trust` first.
 - If the account already has a GitHub OIDC provider from another project, set
   `USE_EXISTING_GITHUB_OIDC_PROVIDER=true`. AWS allows only one, and we reuse it without
   managing it. Check with `aws iam list-open-id-connect-providers`.
@@ -23,8 +26,11 @@ modules/     vendored terraform-aws-modules
 ## Method 1: everything from your laptop
 
 ```sh
-git clone https://github.com/basenote-dev/gitea-template.git && cd gitea-template/bootstrap
+git clone https://github.com/basenote-dev/gitea-template.git
+cd gitea-template
+mise trust
 mise install
+cd bootstrap
 terragrunt run --all apply --backend-bootstrap
 ```
 
@@ -33,8 +39,11 @@ Tear down with `terragrunt run --all destroy` (keeps `state/`).
 ## Method 2: bootstrap from your laptop, then GitHub Actions deploys
 
 ```sh
-git clone <your copy of this repo> && cd <it>/bootstrap
+git clone <your copy of this repo>
+cd <it>
+mise trust
 mise install
+cd bootstrap
 GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
 ```
 
