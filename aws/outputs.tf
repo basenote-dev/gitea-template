@@ -25,8 +25,5 @@ output "helmfile_values" {
     # Secrets Manager names External Secrets reads (db, valkey, admin, metrics, ssh_host_key, app_ini_keys)
     secret_names         = { for k, s in data.aws_secretsmanager_secret.this : k => s.name }
     gitea_admin_username = local.gitea_admin_username
-
-    # Gitea version to deploy (main.tf locals); Helmfile adds "-rootless"
-    gitea_image_tag = local.gitea_version
   }
 }

@@ -25,10 +25,10 @@ environments:
       - values/tofu-outputs.yaml.gotmpl
 
 ---
-{{- /* gitea_version in aws/main.tf; the chart appends "-rootless". */}}
-{{- $giteaTag := .Values.gitea_image_tag | toString }}
+{{- /* gitea.version in env/sandbox.yaml; the chart appends "-rootless". */}}
+{{- $giteaTag := .Values.gitea.version | toString }}
 {{- if not (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" $giteaTag) }}
-{{-   fail (printf "gitea_image_tag must be a release version like 1.26.3, got %q" $giteaTag) }}
+{{-   fail (printf "gitea.version must be a release version like 1.26.3, got %q" $giteaTag) }}
 {{- end }}
 
 {{- /* The controller, webhook and cert-controller share one image: the chart's appVersion. */}}
@@ -92,7 +92,7 @@ releases:
       - gitea/gitea-config
     values:
       - values/gitea.yaml.gotmpl
-      # docker.gitea.com/gitea:<gitea_image_tag>-rootless
+      # docker.gitea.com/gitea:<gitea.version>-rootless
       - image:
           registry: docker.gitea.com
           repository: gitea
