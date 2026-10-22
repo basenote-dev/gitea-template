@@ -31,20 +31,19 @@ modules/     vendored terraform-aws-modules
 Deploy from your own repo, not from this template. Pull requests and deploys then happen in
 your repo, and the template stays as it is.
 
-The examples use the GitHub account `my-org` and the repo name `gitea-deployment`. Put your
-own account and repo name in their place.
+Replace `<your-github-username>` with your GitHub username (or organization).
 
 Start a new repo from the template (creates the repo on GitHub and clones it):
 
 ```sh
-gh repo create my-org/gitea-deployment --template basenote-dev/gitea-template --private --clone
+gh repo create <your-github-username>/gitea-deployment --template basenote-dev/gitea-template --private --clone
 cd gitea-deployment
 ```
 
 Or, if you already created an empty repo on GitHub, copy the template into it:
 
 ```sh
-git clone https://github.com/my-org/gitea-deployment.git
+git clone https://github.com/<your-github-username>/gitea-deployment.git
 cd gitea-deployment
 git remote add template https://github.com/basenote-dev/gitea-template.git
 git pull template main
