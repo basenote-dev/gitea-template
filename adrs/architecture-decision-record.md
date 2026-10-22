@@ -15,11 +15,23 @@ An upgrade without downtime needs three things. There have to be at least two co
 running at once. Something has to start a new copy, wait until it's healthy, move traffic to
 it, then drain and stop an old copy. And every copy has to share the repos, sessions and keys.
 
-On one host we would write that rollout ourselves: Ansible plays that start a second
-container, poll its health, rewrite the nginx upstream, reload nginx, wait for connections to
-drain and stop the old container. The host would still be a single point of failure, so
-patching or replacing it is an outage. Kubernetes does the rollout natively (rolling updates,
-readiness probes, a disruption budget), and the load balancers follow the pods on their own.
+Everything Ansible would do on a host is defined here as Kubernetes objects, which the cluster
+keeps applying for us:
+
+| On a host with Ansible | Here, in Kubernetes |
+| --- | --- |
+| Template `app.ini` and other config files | Helm values, rendered into the pod's config, with secrets from External Secrets |
+| Copy secrets onto the host | Kubernetes Secrets, synced from Secrets Manager by External Secrets |
+| Create folders, run `gitea migrate`, create the admin user | Init containers that run before Gitea starts in every pod |
+| One-off tasks | A Kubernetes Job (none needed so far) |
+| Start, restart and upgrade the container | A Deployment, which rolls pods one at a time |
+| Check that Gitea is healthy | Readiness and liveness probes |
+| Write the nginx config and reload it | An Ingress and a Service, which create and update the load balancers |
+
+On one host, the rollout itself would also be ours to script: start a second container, poll
+its health, switch nginx over, wait for connections to drain, stop the old one. The host would
+still be a single point of failure, so patching or replacing it is an outage. In Kubernetes the
+Deployment does that rollout, and the load balancers follow the pods on their own.
 
 | What the assignment suggests | What we use | Why |
 | --- | --- | --- |
@@ -48,9 +60,9 @@ Service, so they follow the pods during a rollout without anyone editing their c
 ### Instead of Ansible: OpenTofu, Terragrunt and Helmfile
 
 We left Ansible out because there's nothing for it to configure. Ansible's job is setting up
-servers over SSH: packages, files, services. Here AWS runs the nodes, and everything on them is
-a container whose config is in Helm values. Adding Ansible would mean a second way to configure
-the same things.
+servers over SSH: packages, files, services. Here AWS runs the nodes, and each Ansible task has
+a Kubernetes object instead (the table above). Adding Ansible would mean a second way to
+configure the same things.
 
 - OpenTofu creates everything in AWS (`aws/`). It's the open-source fork of Terraform and reads
   the same code. We chose it because it can encrypt state and plan files on the client: the
