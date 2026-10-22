@@ -132,6 +132,48 @@ Manager with write-only arguments. RDS and Valkey read theirs the same way. Exte
 copies them into the cluster at run time. No secret value is in Git, in OpenTofu state, or in
 plan output.
 
+## Security enhancements
+
+The stock setup would work without these. Each one closes a way an attacker, or a mistake,
+could get more access than Gitea needs.
+
+### Gitea can't run as root
+
+The rootless Gitea image already defaults to the `git` user (UID 1000), but an image default
+can be overridden. The manifest enforces it on the Gitea container and all three init
+containers (`containerSecurityContext` in `helmfile/values/gitea.yaml.gotmpl`):
+
+| Setting | What it prevents |
+| --- | --- |
+| `runAsNonRoot: true` | The kubelet refuses to start the container as UID 0, whatever the image says |
+| `runAsUser: 1000`, `runAsGroup: 1000` | Running as any other user. It matches the EFS access point's uid and gid |
+| `allowPrivilegeEscalation: false` | Becoming root later through setuid binaries |
+| `capabilities.drop: ["ALL"]` | Using any Linux capability, even as the non-root user |
+| `seccompProfile: RuntimeDefault` (pod) | Calling syscalls the default container profile blocks |
+
+On a running cluster, `kubectl exec -n gitea deploy/gitea -- id` prints `uid=1000(git)`.
+
+The namespace enforces Pod Security `baseline` and only warns on `restricted`. The Gitea pods
+already meet `restricted`, so enforcing it is a one-line change in
+`helmfile/charts/gitea-cluster/templates/namespace.yaml` that would reject any future pod that
+tries to run as root.
+
+### Everything else
+
+- Data stores are private. RDS, Valkey and EFS sit in private subnets, and each has a security
+  group that accepts only the cluster.
+- Traffic to the data stores is encrypted. RDS rejects connections without TLS
+  (`rds.force_ssl`), and Valkey uses TLS plus an auth token.
+- Data at rest is encrypted: RDS, Valkey, EFS, and the OpenTofu state, which is encrypted with
+  a KMS key on the client before it reaches S3.
+- The EFS access point limits pods to Gitea's folder.
+- No secret value is in Git, state or plan output (see "Secrets that never appear in state").
+- No AWS keys are stored in GitHub, and only `main` can deploy (see "No stored AWS keys").
+- External Secrets can read only Gitea's six secrets.
+- GitHub Actions are pinned to commit SHAs, so a moved tag can't change what runs.
+- The ALB drops requests with invalid header fields.
+- Open registration is off, and the admin password is random.
+
 ## A random suffix on every name
 
 Some AWS names stay taken after a teardown: a KMS alias while its key waits out the 7-day
