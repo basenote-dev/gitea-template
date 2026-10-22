@@ -101,25 +101,6 @@ Three files hold all of it. Read them in this order:
    `dependency "state"` (reads `state/`'s outputs, so `state/` runs first),
    `generate "encryption"`, and the hooks from step 4.
 
-### See what it does
-
-Run these from `bootstrap/`:
-
-```sh
-terragrunt dag graph                    # run order; "gitea" -> "state" means gitea needs state
-terragrunt render --working-dir gitea   # the gitea unit's config with every value filled in
-```
-
-`render` needs `state/` applied first. It shows the `inputs` with the real suffix and role
-names, and the generated `encryption.tf` with the real KMS key ARN.
-
-After a run, `gitea/.terragrunt-cache/<hash>/<hash>/aws/` is the folder where `tofu` really
-ran. It has a copy of `aws/` plus the three files Terragrunt wrote: `backend.tf`,
-`provider.tf` and `encryption.tf`.
-
-Add `--log-level debug` to any command to see every command Terragrunt runs: `tofu init`,
-`tofu apply` and each hook.
-
 ## Upgrade Gitea
 
 ![Gitea's two pods, the secrets they get from Secrets Manager, and the services those secrets unlock](docs/images/runtime.svg)
