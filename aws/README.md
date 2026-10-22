@@ -5,7 +5,7 @@ Plain OpenTofu for every AWS resource Gitea runs on. There is no Terragrunt here
 
 | Section in `main.tf` | What |
 | --- | --- |
-| VPC | /16 over 3 AZs: public, private (nodes and pods) and database subnets, one NAT gateway, flow logs |
+| VPC | /16 over 3 AZs: public, private (nodes and pods) and database subnets, one NAT gateway |
 | EKS | Auto Mode cluster `gitea`, Kubernetes 1.37, access entries only: `github-apply` and `platform-eks-admin` admin, `github-plan` view |
 | EKS Add-ons | EFS CSI driver and CloudWatch Observability with Pod Identity roles, Container Insights log groups |
 | External Secrets Pod Identity | Role for External Secrets Operator that can read only the five `gitea/*` secrets |
