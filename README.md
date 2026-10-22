@@ -31,19 +31,23 @@ modules/     vendored terraform-aws-modules
 Deploy from your own repo, not from this template. Pull requests and deploys then happen in
 your repo, and the template stays as it is.
 
-Replace `<your-github-username>` with your GitHub username (or organization).
+Set your GitHub username (or organization) once. Every command below uses it:
+
+```sh
+export GH_USERNAME=<your-github-username>
+```
 
 Start a new repo from the template (creates the repo on GitHub and clones it):
 
 ```sh
-gh repo create <your-github-username>/gitea-deployment --template basenote-dev/gitea-template --private --clone
+gh repo create $GH_USERNAME/gitea-deployment --template basenote-dev/gitea-template --private --clone
 cd gitea-deployment
 ```
 
 Or, if you already created an empty repo on GitHub, copy the template into it:
 
 ```sh
-git clone https://github.com/<your-github-username>/gitea-deployment.git
+git clone https://github.com/$GH_USERNAME/gitea-deployment.git
 cd gitea-deployment
 git remote add template https://github.com/basenote-dev/gitea-template.git
 git pull template main
@@ -133,8 +137,8 @@ The bootstrap only sets up the account and the repo. Nothing is deployed yet. St
 first deploy once, from GitHub Actions:
 
 ```sh
-gh workflow run deploy.yml -R <your-github-username>/gitea-deployment -f action="OpenTofu Apply"
-gh run watch -R <your-github-username>/gitea-deployment
+gh workflow run deploy.yml -R $GH_USERNAME/gitea-deployment -f action="OpenTofu Apply"
+gh run watch -R $GH_USERNAME/gitea-deployment
 ```
 
 (Or in the browser: Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Apply`.) It runs the
@@ -156,7 +160,7 @@ your `GITHUB_TOKEN`), together with the `sandbox-plan` and `sandbox-apply` envir
 To see them: your repo -> Settings -> Secrets and variables -> Actions -> Variables tab, or:
 
 ```sh
-gh variable list -R <your-github-username>/gitea-deployment
+gh variable list -R $GH_USERNAME/gitea-deployment
 ```
 
 A run that was skipped before the bootstrap runs for real if you re-run it afterwards, because
