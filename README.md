@@ -144,8 +144,23 @@ SSH host.
 From then on, changes go through pull requests: each PR gets a plan comment (OpenTofu plan and
 Helm diff), and each merge to `main` deploys it. To remove it, see [Tear down](#tear-down).
 
-The workflow does nothing in a repository the bootstrap hasn't run for (a fresh clone, or this
-template), so pushing first is harmless.
+### What turns the pipeline on
+
+Every job in the workflow first checks the repo variable `BOOTSTRAPPED`. If it isn't `true`,
+the job is skipped. That's why a push to a fresh copy, or to this template, shows every job as
+skipped.
+
+You never set it by hand. The bootstrap command above creates it through the GitHub API (with
+your `GITHUB_TOKEN`), together with the `sandbox-plan` and `sandbox-apply` environments and their
+`AWS_ROLE_ARN` variables. They're repo settings, not files, so they don't show up as commits.
+To see them: your repo -> Settings -> Secrets and variables -> Actions -> Variables tab, or:
+
+```sh
+gh variable list -R <your-github-username>/gitea-deployment
+```
+
+A run that was skipped before the bootstrap runs for real if you re-run it afterwards, because
+a re-run checks `BOOTSTRAPPED` again.
 
 ## What `terragrunt run --all apply` does
 
