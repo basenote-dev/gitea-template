@@ -176,6 +176,42 @@ gh variable list -R $GH_USERNAME/gitea-deployment
 A run that was skipped before the bootstrap runs for real if you re-run it afterwards, because
 a re-run checks `BOOTSTRAPPED` again.
 
+## Connect to the cluster and log in to Gitea
+
+After either method, from a shell logged in to the same AWS account as an admin. The cluster
+and everything else are named `gitea-<suffix>`, so the first command looks the name up:
+
+```sh
+export AWS_REGION=us-west-2
+CLUSTER=$(aws eks list-clusters --query "clusters[?starts_with(@, 'gitea-')] | [0]" --output text)
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+```
+
+Add the cluster to `~/.kube/config`. It assumes the `platform-eks-admin` role, which is how
+people get cluster admin (see [ADR 0001](adrs/0001-architecture-decisions.md#no-stored-aws-keys)):
+
+```sh
+aws eks update-kubeconfig --name "${CLUSTER}" --alias "${CLUSTER}" \
+  --role-arn "arn:aws:iam::${ACCOUNT}:role/${CLUSTER}-platform-eks-admin"
+kubectl get pods -n gitea
+```
+
+You should see 2 `gitea-...` pods `Running`.
+
+Get the URLs and the admin password:
+
+```sh
+kubectl get ingress gitea -n gitea -o jsonpath='http://{.status.loadBalancer.ingress[0].hostname}/{"\n"}'
+kubectl get service gitea-ssh -n gitea -o jsonpath='git@{.status.loadBalancer.ingress[0].hostname}{"\n"}'
+aws secretsmanager get-secret-value --secret-id "${CLUSTER}/admin" --query SecretString --output text
+```
+
+Open the first URL and log in as `gitea_admin` with that password. A new load balancer's
+hostname can take a few minutes to resolve, so if the page doesn't load yet, wait and retry.
+
+Keep the braces in `${ACCOUNT}` and `${CLUSTER}`: in zsh, `$ACCOUNT:role` would be read as a
+variable modifier and break the ARN.
+
 ## What `terragrunt run --all apply` does
 
 ![The seven steps of terragrunt run --all apply, in order](docs/images/deploy-flow.svg)
