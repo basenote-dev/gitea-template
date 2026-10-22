@@ -111,7 +111,7 @@ jobs:
           aws eks update-kubeconfig --name "$cluster" --alias gitea-sandbox
           cd helmfile
           diff=$(mise exec -- helmfile --quiet --no-color --environment sandbox --kube-context gitea-sandbox \
-            diff --context 5 --suppress-secrets --skip-diff-on-install 2>&1) || true
+            diff --context 5 --suppress-secrets --skip-diff-on-install 2>&1 | grep -v '^Comparing release=') || true
           {
             echo "### Helm diff"
             echo
