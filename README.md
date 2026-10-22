@@ -8,6 +8,7 @@ aws/         OpenTofu: VPC, EKS, RDS, Valkey, EFS
 helmfile/    everything inside the cluster (Gitea, External Secrets)
 bootstrap/   Terragrunt config that ties it together, plus the one-time state/ setup
 scripts/     the zero-downtime health check
+docs/images/ the diagrams in this README
 .mise.toml   pinned tool versions (mise install)
 modules/     vendored terraform-aws-modules
 ```
@@ -58,6 +59,8 @@ The workflow does nothing in a repository the bootstrap hasn't run for (a fresh 
 template), so pushing first is harmless.
 
 ## What `terragrunt run --all apply` does
+
+![The seven steps of terragrunt run --all apply, in order](docs/images/deploy-flow.svg)
 
 Terragrunt creates nothing itself. It writes a few files into each unit, runs `tofu` in the
 units in the right order, and runs commands before and after (hooks). There are two units:
@@ -116,6 +119,8 @@ Add `--log-level debug` to any command to see every command Terragrunt runs: `to
 `tofu apply` and each hook.
 
 ## What a Gitea upgrade does
+
+![Gitea's two pods, the secrets they get from Secrets Manager, and the services those secrets unlock](docs/images/runtime.svg)
 
 1. Change `gitea_version` in `aws/main.tf` in a pull request, one release at a time
    (1.26.3 -> 1.26.4 -> 1.27.3 -> 28.2.0).
