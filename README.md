@@ -40,7 +40,7 @@ terragrunt run --all apply --backend-bootstrap --non-interactive
 `--non-interactive` skips Terragrunt's "run apply in each unit?" prompt. `run --all` already
 auto-approves each OpenTofu apply.
 
-Tear down with `terragrunt run --all destroy` (keeps `state/`).
+To remove it, see [Tear down](#tear-down).
 
 ## Method 2: bootstrap from your laptop, then GitHub Actions deploys
 
@@ -55,7 +55,7 @@ GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-boo
 
 Then start the first deploy: Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Apply`.
 After that, every pull request gets a plan comment (OpenTofu plan and Helm diff), and every
-merge to `main` deploys it. Tear down with Run workflow -> `OpenTofu Destroy`.
+merge to `main` deploys it. To remove it, see [Tear down](#tear-down).
 
 The workflow does nothing in a repository the bootstrap hasn't run for (a fresh clone, or this
 template), so pushing first is harmless.
@@ -188,6 +188,31 @@ Everything we built on top of the stock modules and charts:
 [adrs/0002-what-we-built.md](adrs/0002-what-we-built.md).
 What the bootstrap creates, and how pipelines and `kubectl` log in:
 [adrs/0003-bootstrap-and-access.md](adrs/0003-bootstrap-and-access.md).
+
+## Tear down
+
+This removes the whole Gitea stack: the Helm releases (and with them the load balancers), then
+the cluster, RDS, Valkey, EFS and the VPC. It takes about 15 minutes.
+
+From your laptop (method 1), with the same AWS credentials and region as the deploy:
+
+```sh
+cd bootstrap
+terragrunt run --all destroy --non-interactive
+```
+
+With GitHub Actions (method 2): Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Destroy`.
+
+The bootstrap stays, so the next deploy can reuse it: the state bucket, the KMS key, the IAM
+roles, the secrets and the GitHub OIDC provider. Together they cost about $3 a month. The KMS
+key has `prevent_destroy`, and the bucket holds the bootstrap's own state, so `state/` can't
+destroy itself. To remove the bootstrap too, delete those resources by hand, then schedule the
+key for deletion (7 days is the shortest AWS allows):
+
+```sh
+aws kms schedule-key-deletion --pending-window-in-days 7 \
+  --key-id "$(aws kms describe-key --key-id alias/gitea-<suffix>-tofu-state --query KeyMetadata.KeyId --output text)"
+```
 
 ## Demo limitations
 
