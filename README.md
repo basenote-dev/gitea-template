@@ -107,15 +107,53 @@ Three files hold all of it. Read them in this order:
 
 An upgrade is a change to one line: `gitea_version` in the locals of
 [`aws/main.tf`](aws/main.tf). Go one release at a time: 1.26.3 -> 1.26.4 -> 1.27.3 -> 28.2.0.
-Start the health check below first, so it sees the whole rollout.
 
-### Watch it
+### Method 1: from your laptop
 
-In a separate terminal, with the same AWS credentials and region as the deploy:
+```sh
+sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf   # GNU sed: -i without ''
+cd bootstrap
+terragrunt run --all apply --non-interactive
+```
+
+Only the Helm release changes, so the apply takes a few minutes.
+
+Watch the upgrade: before you run the apply, start the health check in a second terminal, with
+the same AWS credentials and region:
 
 ```sh
 scripts/zero-downtime-upgrade-healthcheck.sh
 ```
+
+### Method 2: with a pull request
+
+```sh
+git checkout -b upgrade-gitea-1.26.4
+sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf   # GNU sed: -i without ''
+git commit -am "Upgrade Gitea 1.26.3 to 1.26.4"
+git push -u origin upgrade-gitea-1.26.4
+gh pr create --fill
+gh pr checks --watch
+```
+
+The pull request runs the plan job, which comments the OpenTofu plan and the Helm diff on the
+PR. For an upgrade it should show only the Gitea image tag changing.
+
+Watch the upgrade: before you merge, start the health check in a second terminal, with the
+same AWS credentials and region:
+
+```sh
+scripts/zero-downtime-upgrade-healthcheck.sh
+```
+
+Then merge. The merge to `main` runs the apply job, and the pods roll one at a time:
+
+```sh
+gh pr merge --squash --delete-branch
+gh run watch
+```
+
+### What the health check shows
 
 It needs only the AWS CLI, git and curl. It finds the load balancers by their tags, logs in as
 the admin, and makes a test repo and a temporary SSH key. Then five loops hit Gitea every 1 to 3
@@ -129,37 +167,6 @@ through the API. Every 5 seconds it prints each check's last result and its ok/f
 The second number is failures and should stay at 0. Leave it running a minute after the
 rollout ends, then press Ctrl-C. It prints the totals and the time of any failure, and keeps
 every result in `zero-downtime-healthcheck-<time>.log`.
-
-### With a pull request (method 2)
-
-```sh
-git checkout -b upgrade-gitea-1.26.4
-sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf   # GNU sed: -i without ''
-git commit -am "Upgrade Gitea 1.26.3 to 1.26.4"
-git push -u origin upgrade-gitea-1.26.4
-gh pr create --fill
-gh pr checks --watch
-```
-
-The pull request runs the plan job, which comments the OpenTofu plan and the Helm diff on the
-PR. For an upgrade it should show only the Gitea image tag changing. Then merge it:
-
-```sh
-gh pr merge --squash --delete-branch
-gh run watch
-```
-
-The merge to `main` runs the apply job, and the pods roll one at a time.
-
-### From your laptop (method 1)
-
-```sh
-sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf
-cd bootstrap
-terragrunt run --all apply --non-interactive
-```
-
-Only the Helm release changes, so the apply takes a few minutes.
 
 ### What happens during the rollout
 
