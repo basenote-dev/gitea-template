@@ -46,10 +46,15 @@ web_host=$(lb ingress.eks.amazonaws.com/stack sandbox)
 ssh_host=$(lb service.eks.amazonaws.com/stack gitea/gitea-ssh)
 url=http://$web_host
 
+# The admin password secret is gitea-<suffix>/admin (bootstrap/state picks the suffix). The newest
+# one wins, in case an earlier build left its secret behind.
+admin_secret=$(aws secretsmanager list-secrets --filters Key=name,Values=gitea- \
+  --query "reverse(sort_by(SecretList[?ends_with(Name, '/admin')], &CreatedDate))[0].Name" --output text)
+
 # Admin credentials in a netrc file, so the password never shows up in the process list.
 umask 077
 printf 'machine %s login %s password %s\n' "$web_host" "$admin" \
-  "$(aws secretsmanager get-secret-value --secret-id gitea/admin --query SecretString --output text)" >"$work/netrc"
+  "$(aws secretsmanager get-secret-value --secret-id "$admin_secret" --query SecretString --output text)" >"$work/netrc"
 api() { curl -fsS --max-time 5 --netrc-file "$work/netrc" -H 'Content-Type: application/json' "$@"; }
 
 cleanup() {

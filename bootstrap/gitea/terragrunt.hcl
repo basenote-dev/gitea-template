@@ -11,8 +11,12 @@
 #   apply    tofu apply, then `helmfile apply`
 #   destroy  `helmfile destroy` first (removes the load balancers), then tofu destroy
 #
-# root.hcl generates the backend, the AWS provider (region, account guard, cost tags from
-# account.hcl) and state encryption.
+# root.hcl generates the backend and the AWS provider (region, account guard, cost tags from
+# account.hcl). This file generates the state encryption.
+#
+# Names come from state/: its random suffix makes everything here gitea-<suffix> (cluster, RDS,
+# Valkey, EFS, log groups), and its outputs give the KMS key and role names. Terragrunt locals
+# can't read dependency outputs, so the hooks below use dependency.state.outputs directly.
 include "root" {
   path = find_in_parent_folders("root.hcl")
 }
@@ -20,40 +24,81 @@ include "root" {
 locals {
   account = read_terragrunt_config(find_in_parent_folders("account.hcl")).locals
 
-  cluster_name = "gitea" # local.name in main.tf
   kube_context = "gitea-${local.account.account_name}"
   helmfile_dir = "${get_repo_root()}/helmfile"
 
-  # Does the EKS cluster exist yet? Asked only for plan and destroy (a fresh account has nothing
-  # to diff or uninstall); the for expression keeps run_cmd from running for other commands.
-  cluster_exists = anytrue([
-    for cmd in contains(["plan", "destroy"], get_terraform_command()) ? ["check"] : [] :
-    trimspace(run_cmd("--terragrunt-quiet", "aws", "eks", "list-clusters",
-      "--region", local.account.aws_region,
-      "--query", "contains(clusters, '${local.cluster_name}')",
-    "--output", "text")) == "True"
-  ])
-
-  # Writes the cluster to ~/.kube/config as context gitea-sandbox. In CI the job's own role has
-  # an EKS access entry (github-plan view, github-apply admin). On a laptop the caller is any
-  # admin in the account, so kubectl assumes platform-eks-admin (created by state/, trusted by
-  # the account) instead of needing its own access entry.
-  kubeconfig = concat([
-    "aws", "eks", "update-kubeconfig",
-    "--name", local.cluster_name,
-    "--region", local.account.aws_region,
-    "--alias", local.kube_context,
-    ], get_env("GITHUB_ACTIONS", "") == "true" ? [] : [
-    "--role-arn", "arn:aws:iam::${local.account.account_id}:role/platform-eks-admin",
-  ])
-
   # Helmfile reads this stack's outputs itself (helmfile/values/tofu-outputs.yaml.gotmpl).
   helmfile = ["helmfile", "--no-color", "--environment", local.account.account_name, "--kube-context", local.kube_context]
+
+  # Plan and destroy first ask whether the EKS cluster exists yet (a fresh account has nothing to
+  # diff or uninstall). Other commands skip the question.
+  check_cluster = contains(["plan", "destroy"], get_terraform_command())
 }
 
-# Ordering only (no outputs used): on a laptop, run --all applies state/ first.
-dependencies {
-  paths = ["../state"]
+################################################################################
+# State Unit Outputs
+################################################################################
+# The name suffix, the state KMS key and the role names, all created by state/. Also orders a
+# laptop `run --all`: state/ applies first. In CI state/ is excluded from the run, but its
+# outputs are still read from its state (the CI roles can read the bucket). The mocks only serve
+# `validate` before the bootstrap has run.
+
+dependency "state" {
+  config_path = "../state"
+
+  mock_outputs = {
+    name              = "gitea-000000"
+    state_kms_key_arn = "arn:aws:kms:us-west-2:000000000000:key/00000000-0000-0000-0000-000000000000"
+    role_names = {
+      github_plan        = "gitea-000000-github-plan"
+      github_apply       = "gitea-000000-github-apply"
+      platform_eks_admin = "gitea-000000-platform-eks-admin"
+    }
+  }
+  mock_outputs_allowed_terraform_commands = ["validate"]
+}
+
+inputs = {
+  name       = dependency.state.outputs.name
+  role_names = dependency.state.outputs.role_names
+}
+
+################################################################################
+# State and Plan Encryption
+################################################################################
+# OpenTofu client-side encryption (AES-GCM, data key from the state KMS key state/ created).
+# `enforced` makes OpenTofu refuse to read or write unencrypted state or plan files, so state and
+# saved plan files are ciphertext even to someone who can read the bucket. state/ itself has no
+# encryption: it creates the key.
+
+generate "encryption" {
+  path      = "encryption.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<-EOF
+    terraform {
+      encryption {
+        key_provider "aws_kms" "state" {
+          kms_key_id = "${dependency.state.outputs.state_kms_key_arn}"
+          region     = "${local.account.aws_region}"
+          key_spec   = "AES_256"
+        }
+
+        method "aes_gcm" "state" {
+          keys = key_provider.aws_kms.state
+        }
+
+        state {
+          method   = method.aes_gcm.state
+          enforced = true
+        }
+
+        plan {
+          method   = method.aes_gcm.state
+          enforced = true
+        }
+      }
+    }
+  EOF
 }
 
 terraform {
@@ -66,10 +111,28 @@ terraform {
     arguments = ["-lock-timeout=20m"]
   }
 
+  # Writes the cluster to ~/.kube/config as context gitea-sandbox. In CI the job's own role has
+  # an EKS access entry (github-plan view, github-apply admin). On a laptop the caller is any
+  # admin in the account, so kubectl assumes the platform-eks-admin role (created by state/,
+  # trusted by the account) instead of needing its own access entry.
   after_hook "kubeconfig" {
     commands = ["apply", "plan"]
-    execute  = local.kubeconfig
-    if       = get_terraform_command() == "apply" || local.cluster_exists
+    execute = concat([
+      "aws", "eks", "update-kubeconfig",
+      "--name", dependency.state.outputs.name,
+      "--region", local.account.aws_region,
+      "--alias", local.kube_context,
+      ], get_env("GITHUB_ACTIONS", "") == "true" ? [] : [
+      "--role-arn", "arn:aws:iam::${local.account.account_id}:role/${dependency.state.outputs.role_names.platform_eks_admin}",
+    ])
+    # run_cmd results are cached, so the identical cluster checks below run once.
+    if = get_terraform_command() == "apply" || anytrue([
+      for cmd in local.check_cluster ? ["check"] : [] :
+      trimspace(run_cmd("--terragrunt-quiet", "aws", "eks", "list-clusters",
+        "--region", local.account.aws_region,
+        "--query", "contains(clusters, '${dependency.state.outputs.name}')",
+      "--output", "text")) == "True"
+    ])
   }
 
   # What Helm would change, shown in the plan output (and the PR comment in CI).
@@ -77,7 +140,13 @@ terraform {
     commands    = ["plan"]
     execute     = concat(local.helmfile, ["diff", "--context", "5", "--suppress-secrets", "--skip-diff-on-install"])
     working_dir = local.helmfile_dir
-    if          = local.cluster_exists
+    if = anytrue([
+      for cmd in local.check_cluster ? ["check"] : [] :
+      trimspace(run_cmd("--terragrunt-quiet", "aws", "eks", "list-clusters",
+        "--region", local.account.aws_region,
+        "--query", "contains(clusters, '${dependency.state.outputs.name}')",
+      "--output", "text")) == "True"
+    ])
   }
 
   after_hook "helmfile_apply" {
@@ -103,8 +172,21 @@ terraform {
 
   before_hook "kubeconfig" {
     commands = ["destroy"]
-    execute  = local.kubeconfig
-    if       = local.cluster_exists
+    execute = concat([
+      "aws", "eks", "update-kubeconfig",
+      "--name", dependency.state.outputs.name,
+      "--region", local.account.aws_region,
+      "--alias", local.kube_context,
+      ], get_env("GITHUB_ACTIONS", "") == "true" ? [] : [
+      "--role-arn", "arn:aws:iam::${local.account.account_id}:role/${dependency.state.outputs.role_names.platform_eks_admin}",
+    ])
+    if = anytrue([
+      for cmd in local.check_cluster ? ["check"] : [] :
+      trimspace(run_cmd("--terragrunt-quiet", "aws", "eks", "list-clusters",
+        "--region", local.account.aws_region,
+        "--query", "contains(clusters, '${dependency.state.outputs.name}')",
+      "--output", "text")) == "True"
+    ])
   }
 
   # Releases in reverse dependency order, Gitea first. The Ingress and the SSH Service carry the
@@ -115,6 +197,12 @@ terraform {
     commands    = ["destroy"]
     execute     = concat(local.helmfile, ["destroy", "--skip-charts", "--deleteWait", "--deleteTimeout", "900"])
     working_dir = local.helmfile_dir
-    if          = local.cluster_exists
+    if = anytrue([
+      for cmd in local.check_cluster ? ["check"] : [] :
+      trimspace(run_cmd("--terragrunt-quiet", "aws", "eks", "list-clusters",
+        "--region", local.account.aws_region,
+        "--query", "contains(clusters, '${dependency.state.outputs.name}')",
+      "--output", "text")) == "True"
+    ])
   }
 }

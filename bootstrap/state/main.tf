@@ -19,8 +19,27 @@ data "github_repository" "this" {
   full_name = var.github_repository
 }
 
+################################################################################
+# Name Suffix
+################################################################################
+# Every name this stack gives AWS carries a random suffix: the gitea-<suffix> cluster, the
+# gitea-<suffix>/db secret, the gitea-<suffix>-github-plan role, and so on. Several of those
+# names stay taken after a teardown (a KMS alias stays while its key waits out the deletion
+# window, secrets stay during their recovery window, cloud-nuke can leave roles or log groups
+# behind), and a rebuild in the same account used to fail on them with AlreadyExists. A new
+# build picks a new suffix, so it never collides with what an earlier one left.
+#
+# Generated once, on the first apply, and kept in this unit's state. The gitea unit reads it
+# through its `dependency "state"` block. The state bucket is the one exception: Terragrunt
+# needs its name before any state exists, so it stays gitea-tfstate-<account>-<region>.
+
+resource "random_id" "suffix" {
+  byte_length = 3 # 6 hex characters
+}
+
 locals {
-  name    = "gitea"
+  project = "gitea"
+  name    = "${local.project}-${random_id.suffix.hex}"
   account = "sandbox"
 
   account_id = data.aws_caller_identity.current.account_id
@@ -45,8 +64,9 @@ locals {
     var.manage_github ? "repo:${local.github_owner}@${data.github_user.owner[0].id}/${local.github_repository_name}@${data.github_repository.this[0].repo_id}" : "",
   ])
 
-  # Must match root.hcl (remote_state bucket and the encryption key_provider alias).
-  state_bucket                   = "${local.name}-tfstate-${local.account_id}-${local.region}"
+  # The bucket name must match root.hcl (remote_state). The gitea unit finds the key through this
+  # unit's outputs.
+  state_bucket                   = "${local.project}-tfstate-${local.account_id}-${local.region}"
   state_key_alias                = "${local.name}-tofu-state"
   state_key_deletion_window_days = 30
 
@@ -131,17 +151,12 @@ resource "aws_kms_alias" "state" {
   target_key_id = aws_kms_key.state.key_id
 }
 
-# Adopt the key and alias kept from an earlier build of this account. No-op when
-# existing_state_kms_key_id is null, and after the first apply.
+# Adopt a key kept from an earlier build of this account. No-op when existing_state_kms_key_id
+# is null, and after the first apply. Only the key is adopted: its old alias has the old build's
+# suffix, so this build adds its own alias next to it.
 import {
   for_each = var.existing_state_kms_key_id == null ? toset([]) : toset([var.existing_state_kms_key_id])
   to       = aws_kms_key.state
-  id       = each.value
-}
-
-import {
-  for_each = var.existing_state_kms_key_id == null ? toset([]) : toset(["alias/${local.state_key_alias}"])
-  to       = aws_kms_alias.state
   id       = each.value
 }
 
@@ -179,7 +194,7 @@ moved {
 module "github_plan_role" {
   source = "../../modules/terraform-aws-iam/modules/iam-role"
 
-  name                 = "github-plan"
+  name                 = "${local.name}-github-plan"
   use_name_prefix      = false
   description          = "GitHub Actions plans (${var.github_repository}, environment ${local.github_plan_environment})"
   max_session_duration = local.plan_session_seconds
@@ -222,7 +237,7 @@ module "github_plan_role" {
 module "github_apply_role" {
   source = "../../modules/terraform-aws-iam/modules/iam-role"
 
-  name                 = "github-apply"
+  name                 = "${local.name}-github-apply"
   use_name_prefix      = false
   description          = "GitHub Actions applies (${var.github_repository}, environment ${local.github_apply_environment})"
   max_session_duration = local.apply_session_seconds
@@ -253,7 +268,7 @@ module "github_apply_role" {
 module "platform_eks_admin_role" {
   source = "../../modules/terraform-aws-iam/modules/iam-role"
 
-  name            = "platform-eks-admin"
+  name            = "${local.name}-platform-eks-admin"
   use_name_prefix = false
   description     = "Cluster admin for people (the gitea unit grants its EKS access entry)"
 
@@ -412,4 +427,55 @@ resource "github_actions_variable" "bootstrapped" {
   value         = "true"
 
   depends_on = [github_actions_environment_variable.plan_role_arn, github_actions_environment_variable.apply_role_arn]
+}
+
+# Adopt variables an earlier bootstrap of this repo left behind (its state gone, for example
+# after the account was wiped). GitHub answers 409 Already exists to a create, so each one that
+# exists is imported instead. Environments need no import: GitHub creates them idempotently.
+# An import of a variable already in state is a no-op.
+data "github_repository_environments" "existing" {
+  count = var.manage_github ? 1 : 0
+
+  repository = local.github_repository_name
+}
+
+data "github_actions_variables" "existing" {
+  count = var.manage_github ? 1 : 0
+
+  name = local.github_repository_name
+}
+
+data "github_actions_environment_variables" "existing" {
+  for_each = toset(var.manage_github ? [
+    for e in data.github_repository_environments.existing[0].environments : e.name
+    if contains([local.github_plan_environment, local.github_apply_environment], e.name)
+  ] : [])
+
+  name        = local.github_repository_name
+  environment = each.key
+}
+
+locals {
+  existing_github_variables = concat(
+    var.manage_github ? [for v in data.github_actions_variables.existing[0].variables : v.name] : [],
+    flatten([for env, d in data.github_actions_environment_variables.existing : [for v in d.variables : "${env}:${v.name}"]]),
+  )
+}
+
+import {
+  for_each = contains(local.existing_github_variables, "${local.github_plan_environment}:AWS_ROLE_ARN") ? toset(["AWS_ROLE_ARN"]) : toset([])
+  to       = github_actions_environment_variable.plan_role_arn[0]
+  id       = "${local.github_repository_name}:${local.github_plan_environment}:${each.key}"
+}
+
+import {
+  for_each = contains(local.existing_github_variables, "${local.github_apply_environment}:AWS_ROLE_ARN") ? toset(["AWS_ROLE_ARN"]) : toset([])
+  to       = github_actions_environment_variable.apply_role_arn[0]
+  id       = "${local.github_repository_name}:${local.github_apply_environment}:${each.key}"
+}
+
+import {
+  for_each = contains(local.existing_github_variables, "BOOTSTRAPPED") ? toset(["BOOTSTRAPPED"]) : toset([])
+  to       = github_actions_variable.bootstrapped[0]
+  id       = "${local.github_repository_name}:${each.key}"
 }

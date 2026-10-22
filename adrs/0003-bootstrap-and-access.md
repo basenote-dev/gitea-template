@@ -21,19 +21,26 @@ GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-boo
 
 All of it is in `bootstrap/state/main.tf`.
 
+The first apply picks a random 6-character suffix and keeps it in state. Every name below
+except the bucket and the OIDC provider starts with `gitea-<suffix>`, for example
+`gitea-3f9a1c-github-plan` and `gitea-3f9a1c/db`. The rest of this document drops the prefix.
+Several names stay taken after a teardown: a KMS alias while its key waits out the deletion
+window, and roles or log groups that a cleanup tool missed. A rebuild with fixed names failed
+with `AlreadyExists` on them. With the suffix, a new build never collides with an old one.
+
 ### In AWS
 
 | What | Name | Why |
 | --- | --- | --- |
 | S3 bucket | `gitea-tfstate-<account>-<region>` | Holds OpenTofu state. Terragrunt creates it empty (`--backend-bootstrap`), then this unit adopts it and locks it down: versioning, encryption, no public access, TLS only |
-| KMS key | `alias/gitea-tofu-state` | Encrypts state and plan files. Has `prevent_destroy`, so a teardown never deletes it by accident |
+| KMS key | `alias/gitea-<suffix>-tofu-state` | Encrypts state and plan files. Has `prevent_destroy`, so a teardown never deletes it by accident |
 | GitHub OIDC provider | `token.actions.githubusercontent.com` | Lets AWS trust tokens that GitHub signs. Skipped with `USE_EXISTING_GITHUB_OIDC_PROVIDER=true` if the account already has one |
-| IAM role | `github-plan` | Pipeline plans. Read-only, plus the state lock file, the state key, and reading `gitea/*` secrets |
-| IAM role | `github-apply` | Pipeline deploys. Admin |
-| IAM role | `platform-eks-admin` | People's way into the cluster |
-| Secrets | `gitea/db`, `gitea/valkey`, `gitea/admin`, `gitea/metrics` | Random passwords. Write-only, so they never land in state or plan output |
-| Secret | `gitea/ssh-host-key` | One SSH host key for every pod |
-| Secret | `gitea/app-ini-keys` | Gitea's four signing keys, shared by every pod |
+| IAM role | `gitea-<suffix>-github-plan` | Pipeline plans. Read-only, plus the state lock file, the state key, and reading `gitea/*` secrets |
+| IAM role | `gitea-<suffix>-github-apply` | Pipeline deploys. Admin |
+| IAM role | `gitea-<suffix>-platform-eks-admin` | People's way into the cluster |
+| Secrets | `gitea-<suffix>/db`, `/valkey`, `/admin`, `/metrics` | Random passwords. Write-only, so they never land in state or plan output |
+| Secret | `gitea-<suffix>/ssh-host-key` | One SSH host key for every pod |
+| Secret | `gitea-<suffix>/app-ini-keys` | Gitea's four signing keys, shared by every pod |
 
 ### In GitHub (only when `GITHUB_TOKEN` is set)
 
@@ -93,8 +100,8 @@ People never get their own access entry. They all go through `platform-eks-admin
 1. Log in to the account as any admin, for example through SSO.
 2. Run the command the stack prints as `kubeconfig_command`:
    ```sh
-   aws eks update-kubeconfig --region us-west-2 --name gitea \
-     --role-arn arn:aws:iam::<account>:role/platform-eks-admin
+   aws eks update-kubeconfig --region us-west-2 --name gitea-<suffix> \
+     --role-arn arn:aws:iam::<account>:role/gitea-<suffix>-platform-eks-admin
    ```
 3. Each `kubectl` call now runs `aws eks get-token --role-arn ...`. The AWS CLI assumes
    `platform-eks-admin` with your session, gets a token, and EKS maps that role to cluster

@@ -29,7 +29,7 @@ piece we wrote or changed on top.
 | Piece | What it does | Why | Needed for zero downtime | Could drop |
 | --- | --- | --- | --- | --- |
 | Generated backend, AWS provider and state encryption | Written into each unit at run time | No unit repeats them | No | No |
-| Repo name read from `git remote get-url origin` | Tags resources with the repo and builds the OIDC trust | A fork trusts itself without edits | No | Could be a typed-in value instead |
+| Repo name read from `git remote get-url origin` | Builds the OIDC trust | A fork trusts itself without edits | No | Could be a typed-in value instead |
 | `EXPECTED_ACCOUNT_ID` guard | When set, OpenTofu refuses any other account | Protects against running in the wrong account | No | Yes |
 | Hooks: kubeconfig, `helmfile diff` after plan, `helmfile apply` after apply, `helmfile destroy` before destroy | One Terragrunt command covers AWS and the cluster | No separate deploy script | No | No |
 | Hooks: wait for the load balancers, print the URL and SSH host | Shows where Gitea is at the end of an apply | Convenience | No | Yes |

@@ -4,7 +4,7 @@
 
 output "kubeconfig_command" {
   description = "Adds the cluster to ~/.kube/config as platform-eks-admin (run it from an admin session in this account)"
-  value       = "aws eks update-kubeconfig --region ${local.region} --name ${module.eks.cluster_name} --role-arn ${data.aws_iam_role.this["platform-eks-admin"].arn}"
+  value       = "aws eks update-kubeconfig --region ${local.region} --name ${module.eks.cluster_name} --role-arn ${data.aws_iam_role.this["platform_eks_admin"].arn}"
 }
 
 ################################################################################
