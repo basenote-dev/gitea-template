@@ -5,8 +5,7 @@
 # Terragrunt runs the gitea/ unit (OpenTofu in aws/, then Helmfile from its hooks). CI skips the
 # state/ unit; a person runs it once from a laptop.
 #
-#   pull request          -> plan, posted as two PR comments: the OpenTofu plan (collapsed) and
-#                            the Helm diff (open)
+#   pull request          -> plan, posted as two PR comments: the OpenTofu plan and the Helm diff
 #   merge to main         -> apply
 #   manual run (Actions)  -> plan, apply or destroy
 #
@@ -87,20 +86,44 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Run OpenTofu Plan, Post PR Comment
-        uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
-        env:
-          GITHUB_TOKEN: ${{ github.token }} # the action posts the comment with it
-        with:
-          tg_command: run --all plan --working-dir bootstrap
-          tg_comment: "1"
-          github_token: ${{ github.token }}
+      # The plan runs Terragrunt directly (not terragrunt-action) so the PR comment can hold just
+      # the plan. -concise drops the "Refreshing state..." lines.
+      - name: Run OpenTofu Plan
+        working-directory: bootstrap
+        run: mise exec -- terragrunt run --all plan -- -concise -no-color | tee "$RUNNER_TEMP/plan.txt"
 
-      # What Helm would change in the cluster, as its own comment that opens expanded. The
+      # Only the plan itself (no init or hook output), shown open, with the summary line on top.
+      - name: Format OpenTofu Plan Comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          plan="$RUNNER_TEMP/plan.txt"
+          body=$(awk '/^(No changes\.|OpenTofu will perform|Note: Objects have changed|Changes to Outputs:|Planning failed)/{p=1} /^─+$|^(Added new|Updated) context|^❯❯ Run Summary|^[0-9:.]+ (INFO|WARN|ERROR)/{p=0} p' "$plan")
+          summary=$(grep -m1 -E '^(Plan: |No changes\.|Changes to Outputs:|Planning failed)' "$plan" || echo "The plan failed. See the job log.")
+          {
+            echo "### OpenTofu plan"
+            echo
+            echo "$summary"
+            if ! grep -q '^No changes\.' <<<"$summary"; then
+              echo
+              echo '```diff'
+              # GitHub colors + and - lines; ~ (update in place) becomes ! so it shows in orange.
+              echo "$body" | sed -E 's/^( +)([-+~])( )/\2\1\3/; s/^~/!/'
+              echo '```'
+            fi
+          } > "$RUNNER_TEMP/plan.md"
+
+      - name: Post OpenTofu Plan PR Comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # marocchino/sticky-pull-request-comment:v3.0.5
+        with:
+          header: opentofu-plan
+          path: ${{ runner.temp }}/plan.md
+
+      # What Helm would change in the cluster, as its own comment. The
       # Terragrunt hook skips the diff in CI so it doesn't run twice. Helmfile reads its AWS
       # values from OpenTofu state; the Gitea version comes from helmfile/env/sandbox.yaml.
       - name: Run Helm Diff
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           out="$RUNNER_TEMP/helm-diff.md"
           cluster=$(aws eks list-clusters --query "clusters[?starts_with(@, 'gitea-')] | [0]" --output text)
@@ -125,7 +148,7 @@ jobs:
           } > "$out"
 
       - name: Post Helm Diff PR Comment
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # marocchino/sticky-pull-request-comment:v3.0.5
         with:
           header: helm-diff
