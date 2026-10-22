@@ -408,6 +408,37 @@ sleep 10
 gh run watch -R $GH_USERNAME/gitea-deployment
 ```
 
+Upgrade Gitea to show a zero-downtime deploy. First, in a second terminal, start the health
+check and leave it running:
+
+```sh
+export AWS_PROFILE=cologne-catalog-production AWS_REGION=us-west-2
+cd ~/Desktop/gitea-deployment
+scripts/zero-downtime-upgrade-healthcheck.sh
+```
+
+Then, in the first terminal, open the upgrade PR, check its plan comments, and merge it:
+
+```sh
+export GH_USERNAME=basenote-dev
+cd ~/Desktop/gitea-deployment
+git checkout main && git pull
+git checkout -b upgrade-gitea-1.26.4
+sed -i '' 's/version: "1.26.3"/version: "1.26.4"/' helmfile/env/sandbox.yaml
+git commit -am "Upgrade Gitea 1.26.3 to 1.26.4"
+git push -u origin upgrade-gitea-1.26.4
+gh pr create --fill -R $GH_USERNAME/gitea-deployment
+gh pr checks --watch -R $GH_USERNAME/gitea-deployment
+gh pr merge --squash --delete-branch -R $GH_USERNAME/gitea-deployment
+sleep 10
+gh run watch -R $GH_USERNAME/gitea-deployment
+```
+
+The PR shows two comments: the OpenTofu plan (no changes) and the Helm diff (the image going
+from `1.26.3-rootless` to `1.26.4-rootless`). After the merge, the pods roll one at a time.
+Leave the health check running a minute after the run finishes, then press Ctrl-C: every
+check's failure count should be 0.
+
 Tear it down:
 
 ```sh
