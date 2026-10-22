@@ -117,6 +117,7 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # marocchino/sticky-pull-request-comment:v3.0.5
         with:
           header: opentofu-plan
+          recreate: true # delete the last run's comment, post this one at the bottom
           path: ${{ runner.temp }}/plan.md
 
       # What Helm would change in the cluster, as its own comment. The
@@ -152,6 +153,7 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # marocchino/sticky-pull-request-comment:v3.0.5
         with:
           header: helm-diff
+          recreate: true # delete the last run's comment, post this one at the bottom
           path: ${{ runner.temp }}/helm-diff.md
 
   apply:
