@@ -375,3 +375,40 @@ has a known production fix.
 - Valkey is a single node. If it restarts, users are logged out and queued jobs are lost.
 - HTTP only, on the load balancers' own hostnames. A domain would add HTTPS and a real SSH
   clone URL (Gitea's UI shows `git@localhost:...` without one).
+
+## Run the demo
+
+Every step of method 2 in two blocks you can paste as they are. Set your AWS profile and GitHub
+username in the first lines.
+
+Log in:
+
+```sh
+export AWS_PROFILE=<your-aws-profile>
+aws sso login
+gh auth login
+```
+
+Create your repo, bootstrap it, and start the first deploy:
+
+```sh
+cd ~/Desktop
+export GH_USERNAME=<your-github-username>
+gh repo create $GH_USERNAME/gitea-deployment --template basenote-dev/gitea-template --private --clone
+cd gitea-deployment
+mise trust
+mise install
+cd bootstrap
+AWS_REGION=us-west-2 GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap --non-interactive -auto-approve
+gh workflow run deploy.yml -R $GH_USERNAME/gitea-deployment -f action="OpenTofu Apply"
+sleep 10
+gh run watch -R $GH_USERNAME/gitea-deployment
+```
+
+Tear it down:
+
+```sh
+gh workflow run deploy.yml -R $GH_USERNAME/gitea-deployment -f action="OpenTofu Destroy"
+sleep 10
+gh run watch -R $GH_USERNAME/gitea-deployment
+```
