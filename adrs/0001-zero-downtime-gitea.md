@@ -4,8 +4,8 @@ Status: accepted, 2026-10-21
 
 ## What zero downtime means here
 
-During a Gitea upgrade, every request keeps working. Web, API, git over HTTP and SSH, reads and
-writes. No errors, no dropped clones, no lost pushes.
+During a Gitea upgrade, every request keeps working: the web UI, the API, and git over HTTP and
+SSH, for reads and writes. No request fails and no clone or push is cut off.
 
 This covers Gitea upgrades and anything else that replaces the pods. It doesn't cover AWS
 restarting the database or cache; see "Demo limitations".
@@ -14,8 +14,8 @@ restarting the database or cache; see "Demo limitations".
 
 An upgrade replaces the running program. With one copy, there's a gap between the old one
 stopping and the new one starting. So Gitea runs as 2 pods: one serves while the other is
-replaced. That's the minimum, and Gitea's HA guide says the same. A third pod adds cost, not
-safety.
+replaced. That's the minimum, and Gitea's HA guide says the same. A third pod would add cost
+without making upgrades any safer.
 
 The two pods are identical. Same image, same config, no special roles. The load balancers send
 each request to either one.
@@ -53,8 +53,8 @@ Multi-Attach only works in one AZ, as a raw block device, with a cluster filesys
 HA guide asks for "a RWX file-system". On AWS that's EFS, FSx for NetApp ONTAP, or NFS or Ceph
 you run yourself.
 
-Bonus: repos live outside the cluster, and AWS Backup copies them daily. The cost: EFS is slower
-than a local disk for very large repos.
+EFS also keeps the repos outside the cluster, and AWS Backup copies them daily. The downside is
+speed: EFS is slower than a local disk for very large repos.
 
 ### Why Valkey
 
@@ -81,7 +81,7 @@ A plain install is one pod on a private disk. Each row is a change from that.
 | Database issue indexer | `helmfile/values/gitea.yaml.gotmpl` | Search works with two pods | bleve opens on one pod only |
 | Shared SSH host key | `bootstrap/state`, `helmfile/charts/gitea-config` | Same SSH identity on both pods | SSH refuses every other connection |
 | Per-pod `app.ini` | `helmfile/values/gitea.yaml.gotmpl`, `helmfile/helmfile.yaml.gotmpl` | Each pod builds its own config | Pods corrupt one shared file on a fresh install |
-| Shared signing keys (`gitea/app-ini-keys`) | `bootstrap/state`, `helmfile/charts/gitea-config` | Same keys on both pods | Cookies and tokens fail across pods |
+| Shared signing keys (`gitea-<suffix>/app-ini-keys`) | `bootstrap/state`, `helmfile/charts/gitea-config` | Same keys on both pods | Cookies and tokens fail across pods |
 | Folders made before Gitea starts; OAuth2 `HS256` | `helmfile/values/gitea.yaml.gotmpl` | No folder or key file races on a fresh install | A pod restarts on first start |
 | Readiness probe `GET /api/v1/version` | `helmfile/values/gitea.yaml.gotmpl` | Only a working pod gets traffic | A broken pod passes the stock port check |
 | `maxSurge: 1` | `helmfile/values/gitea.yaml.gotmpl` | Start a new pod before stopping an old one | An old pod could stop first |
@@ -126,7 +126,8 @@ works.
 finishes open requests, clones and pushes, for up to 300 s. The load balancers keep those
 connections open for the same 300 s. Kubernetes force-kills only after 360 s.
 
-**Phase 7, B is replaced.** Same steps with D and B. Done. Never fewer than 2 pods serving.
+**Phase 7, B is replaced.** D replaces B the same way. At no point are fewer than 2 pods
+serving.
 
 Every connection is covered. One that reaches A before the load balancers stop routing to it is
 served during the pause. One already open finishes during shutdown. One that arrives later goes
@@ -194,16 +195,17 @@ Upgrades start one pod at a time, so they never hit these. A brand-new install d
 start at the same second, on an empty disk and an empty database. Testing from scratch found
 these.
 
-1. **Both pods wrote one `app.ini`.** The chart keeps it on the shared disk, and each pod
+1. Both pods wrote one `app.ini`. The chart keeps it on the shared disk, and each pod
    rewrites it at start. One pod read it half-written, started the setup page, and returned 404
    for every API call. Fix: each pod gets its own `app.ini` on a per-pod volume.
-2. **Each pod made its own signing keys.** The pods could sign cookies and tokens differently.
-   Fix: the bootstrap makes the four keys once (`gitea/app-ini-keys`); every pod uses them.
-3. **Both pods created Gitea's folders.** `mkdir /data/home: file exists`, then `/data/jwt`. The
+2. Each pod made its own signing keys, so the pods could sign cookies and tokens differently.
+   Fix: the bootstrap makes the four keys once (`gitea-<suffix>/app-ini-keys`); every pod uses
+   them.
+3. Both pods created Gitea's folders. `mkdir /data/home: file exists`, then `/data/jwt`. The
    loser restarted. Fix: `initPreScript` creates every folder first with `mkdir -p`.
-4. **Each pod made its own OAuth2 key file** in `/data/jwt`. Fix: OAuth2 signs with the shared
+4. Each pod made its own OAuth2 key file in `/data/jwt`. Fix: OAuth2 signs with the shared
    `JWT_SECRET` (`HS256`); no key file.
-5. **Both pods created the per-pod mount point on the shared disk.** `error mounting ... no such
+5. Both pods created the per-pod mount point on the shared disk. `error mounting ... no such
    file or directory`. Fix: a patch keeps that mount off the first init container, which
    creates the folder itself.
 
@@ -211,11 +213,12 @@ Known and accepted: both pods run `gitea migrate` on the empty database at once.
 `relation ... already exists`, retry a few seconds later and start fine. It happens once per new
 environment, before anyone uses Gitea. Upgrades never hit it.
 
-Safety net: the readiness probe fails on a broken pod, so it never gets traffic.
+If one of these still happens, the readiness probe fails on the broken pod, so it never gets
+traffic.
 
-How it was checked: fresh installs from an empty AWS account. Both pods inspected: own
-`app.ini`, identical keys, admin login on each, 40 of 40 logins through the ALB, and every
-container's restart count.
+We checked this with fresh installs in an empty AWS account. Each pod had its own `app.ini` and
+the same keys, the admin could log in on each, 40 of 40 logins through the ALB worked, and no
+container had restarted.
 
 ## How we know it works
 
@@ -238,17 +241,18 @@ The check samples every 1 to 3 seconds. A gap shorter than that could slip betwe
 
 ## Demo limitations
 
-This demo is about one thing: Gitea upgrades without downtime. These parts are kept single to
-save cost. Upgrades never touch them, and each has a known fix.
+These parts are kept single to save cost. Upgrades never touch them, and each has a known fix.
 
-- **One database, one AZ.** AWS maintenance or a failure takes it down for a few minutes.
+- One database, in one AZ. AWS maintenance or a failure takes it down for a few minutes.
   Multi-AZ RDS cuts that to about 40 s. RDS Proxy would turn those seconds into slow requests.
-- **One Valkey node.** If it restarts, users get logged out and queued jobs are lost.
-- **Pods can share a node.** Upgrades are fine. Losing that node causes a short outage.
-- **HTTP only, no domain.** Gitea's UI shows `git@localhost:...` as the SSH clone URL.
+- One Valkey node. If it restarts, users get logged out and queued jobs are lost.
+- Pods can share a node. Upgrades are fine. Losing that node causes a short outage.
+- HTTP only, with no domain. Gitea's UI shows `git@localhost:...` as the SSH clone URL.
 
 ## Alternatives we didn't take
 
-- **One pod on EBS with `Recreate`.** Simplest, and the usual setup. Every deploy is an outage.
-- **A StatefulSet with a disk per pod.** Each pod's copy of the repos would drift apart.
-- **The chart's built-in Postgres and Valkey.** Data would live in the cluster and die with it.
+- One pod on EBS with `Recreate`. It's the simplest and most common setup, but every deploy is an
+  outage.
+- A StatefulSet with a disk per pod. Each pod's copy of the repos would drift apart.
+- The chart's built-in Postgres and Valkey. The data would live in the cluster and be lost with
+  it.
