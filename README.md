@@ -16,6 +16,8 @@ modules/     vendored terraform-aws-modules
 ## Before you start
 
 - Admin AWS credentials for an empty AWS account in your shell (`aws sts get-caller-identity`).
+- Everything deploys to us-west-2 unless you set `AWS_REGION`. Terragrunt and the health check
+  script both use that default, so set `AWS_REGION` the same way for both if you change it.
 - The AWS CLI, git and [mise](https://mise.jdx.dev) installed. For method 2 also `gh`.
 - mise only reads a repo's `.mise.toml` after you trust it. Until then it prints
   `mise WARN ... .mise.toml is not trusted` and installs nothing, so every method below runs
@@ -146,7 +148,8 @@ What the bootstrap creates, and how pipelines and `kubectl` log in:
 
 ## Watch a zero-downtime upgrade
 
-Run this from your laptop, with the same AWS credentials, while a rollout happens:
+Run this from your laptop, with the same AWS credentials and region (us-west-2 unless
+`AWS_REGION` is set), while a rollout happens:
 
 ```sh
 scripts/zero-downtime-upgrade-healthcheck.sh
