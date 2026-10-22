@@ -378,9 +378,12 @@ has a known production fix.
 
 ## Run the demo
 
-Every step of method 2, filled in for the live demo (AWS profile `cologne-catalog-production`,
-GitHub user `basenote-dev`), in blocks you can paste as they are. For your own account, use the
-steps above.
+> **Note:** This section is only for the repo owner, to paste during the live demo. It uses the
+> owner's AWS profile and GitHub account. Everyone else should follow
+> [Get your own copy](#get-your-own-copy) and the methods above.
+
+Every step of method 2, filled in for the demo (AWS profile `cologne-catalog-production`, GitHub
+user `basenote-dev`), in blocks that paste as they are.
 
 Log in:
 
