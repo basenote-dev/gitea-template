@@ -31,8 +31,11 @@ cd gitea-template
 mise trust
 mise install
 cd bootstrap
-terragrunt run --all apply --backend-bootstrap
+terragrunt run --all apply --backend-bootstrap --non-interactive
 ```
+
+`--non-interactive` skips Terragrunt's "run apply in each unit?" prompt. `run --all` already
+auto-approves each OpenTofu apply.
 
 Tear down with `terragrunt run --all destroy` (keeps `state/`).
 
