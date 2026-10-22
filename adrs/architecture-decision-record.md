@@ -3,6 +3,63 @@
 Why the stack is built the way it is. Each section is one decision: what we needed, what we
 chose, and what we turned down.
 
+## Why EKS, and not a container host with Ansible and a reverse proxy
+
+The assignment sketches one host running Gitea and PostgreSQL in containers, set up with
+Ansible, behind a reverse proxy such as nginx. That covers the core goals. We built on EKS for
+two reasons. AllSpice mentioned they're considering a move to Kubernetes, so this shows Gitea
+running there, with the pieces that move would need. And Kubernetes fits the stretch goal,
+upgrading Gitea with no downtime, much better than a single host.
+
+An upgrade without downtime needs three things. There have to be at least two copies of Gitea
+running at once. Something has to start a new copy, wait until it's healthy, move traffic to
+it, then drain and stop an old copy. And every copy has to share the repos, sessions and keys.
+
+On one host we would write that rollout ourselves: Ansible plays that start a second
+container, poll its health, rewrite the nginx upstream, reload nginx, wait for connections to
+drain and stop the old container. The host would still be a single point of failure, so
+patching or replacing it is an outage. Kubernetes does the rollout natively (rolling updates,
+readiness probes, a disruption budget), and the load balancers follow the pods on their own.
+
+| What the assignment suggests | What we use | Why |
+| --- | --- | --- |
+| A containerized host | EKS Auto Mode | AWS runs, patches and replaces the nodes, and Kubernetes replaces Gitea's pods one at a time |
+| Ansible | OpenTofu, Terragrunt and Helmfile | Nothing to configure over SSH (see below) |
+| A reverse proxy | An ALB for HTTP and an NLB for SSH | They health-check each pod and drain it before it stops |
+| PostgreSQL in a container or on the network | RDS PostgreSQL | See "PostgreSQL on RDS" below |
+
+The cost is more moving parts. EKS adds about $0.10 an hour for the control plane, and running
+two copies of Gitea meant fixing races that a single copy never hits (see "Fixes for a
+brand-new install").
+
+### The container host: EKS Auto Mode
+
+Auto Mode is the EKS option where AWS runs the nodes, the load balancer controller and the
+storage driver for block volumes. We don't patch or size nodes. The cluster asks for capacity
+when pods need it.
+
+### The reverse proxy: an ALB and an NLB
+
+The ALB ends client connections, checks each pod's health on `/api/healthz`, and spreads HTTP
+across the pods. It's also where HTTPS would terminate once there's a domain. Git over SSH isn't
+HTTP, so it goes through an NLB. EKS Auto Mode creates both from a Kubernetes Ingress and
+Service, so they follow the pods during a rollout without anyone editing their config.
+
+### Instead of Ansible: OpenTofu, Terragrunt and Helmfile
+
+We left Ansible out because there's nothing for it to configure. Ansible's job is setting up
+servers over SSH: packages, files, services. Here AWS runs the nodes, and everything on them is
+a container whose config is in Helm values. Adding Ansible would mean a second way to configure
+the same things.
+
+- OpenTofu creates everything in AWS (`aws/`). It's the open-source fork of Terraform and reads
+  the same code. We chose it because it can encrypt state and plan files on the client: the
+  state holds endpoints and resource details, so it's encrypted with a KMS key before it
+  reaches S3.
+- Helmfile installs everything inside the cluster (`helmfile/`).
+- Terragrunt ties them together: it sets up the state backend, runs OpenTofu in order, and runs
+  Helmfile from hooks, so one command deploys the whole stack.
+
 ## What the assignment asked for
 
 ### Core
@@ -13,7 +70,7 @@ chose, and what we turned down.
 | Containerized host | Done | EKS Auto Mode cluster, Gitea in 2 pods (official Helm chart, rootless image) |
 | PostgreSQL, external and networked | Done | RDS PostgreSQL 17, private subnets, TLS only |
 | Reverse proxy | Done | ALB for HTTP (Kubernetes Ingress), NLB for SSH |
-| IaC with Terraform and Ansible | Done, with a change | OpenTofu (Terraform-compatible) plus Terragrunt and Helmfile. No Ansible: there are no servers to configure |
+| IaC with Terraform and Ansible | Done, with a change | OpenTofu (Terraform-compatible) plus Terragrunt and Helmfile. No Ansible: there are no servers to configure (see above) |
 
 ### Stretch
 
@@ -26,17 +83,6 @@ chose, and what we turned down.
 | Baseline observability | Done | CloudWatch Container Insights, EKS control plane logs, RDS logs. Gitea metrics on, not scraped |
 | Production considerations | Documented | See "Before production" below |
 | "yoink" in a code comment | Done | `helmfile/helmfile.yaml.gotmpl` |
-
-## Run Gitea on EKS Auto Mode
-
-The assignment asks for a containerized host. A single EC2 instance running Docker would meet
-that, but upgrading it means stopping the one container, which rules out zero-downtime
-upgrades. That needs at least two copies of Gitea and something that replaces them one at a
-time while load balancers move traffic. Kubernetes does both.
-
-Auto Mode is the EKS option where AWS runs the nodes, the load balancer controller and the
-storage driver for block volumes. We don't patch or size nodes. The cluster asks for capacity
-when pods need it.
 
 ## Two pods, with no state inside them
 
@@ -83,30 +129,6 @@ The assignment prefers an external, networked database. RDS gives backups, point
 recovery and patching without running Postgres ourselves, and the data survives if the cluster
 is rebuilt. The Gitea chart can install Postgres and Valkey inside the cluster, but then the
 data lives and dies with the cluster.
-
-## ALB and NLB as the reverse proxy
-
-The assignment asks for a reverse proxy. The ALB is one: it ends client connections, checks pod
-health on `/api/healthz`, and spreads HTTP across the pods. It's also where HTTPS would
-terminate once there's a domain. Git over SSH isn't HTTP, so it goes through an NLB instead.
-Both are created by EKS Auto Mode from a Kubernetes Ingress and Service, so they follow the
-pods during a rollout without anyone editing their config.
-
-## OpenTofu, Terragrunt and Helmfile, not Ansible
-
-The assignment names Terraform and Ansible. We use OpenTofu, the open-source fork of Terraform
-that reads the same code, because it can encrypt state and plan files on the client. The state
-holds endpoints and resource details, so it's encrypted with a KMS key before it reaches S3.
-
-We left Ansible out because there's nothing for it to configure. Ansible's job is setting up
-servers over SSH: packages, files, services. Here AWS runs the nodes, and everything on them is
-a container whose config is in Helm values. Adding Ansible would mean a second way to configure
-the same things.
-
-- OpenTofu creates everything in AWS (`aws/`).
-- Helmfile installs everything inside the cluster (`helmfile/`).
-- Terragrunt ties them together: it sets up the state backend, runs OpenTofu in order, and runs
-  Helmfile from hooks, so one command deploys the whole stack.
 
 ## Zero-downtime rollout settings
 
