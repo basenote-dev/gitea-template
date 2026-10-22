@@ -14,7 +14,7 @@ strategy:
 podDisruptionBudget:
   minAvailable: 1
 
-# image: set in helmfile.yaml.gotmpl (tag from gitea_version in aws/main.tf).
+# image: set in helmfile.yaml.gotmpl (tag from gitea.version in env/sandbox.yaml).
 
 # Prefer replicas in different AZs, so losing one zone usually leaves a pod running. Preferred,
 # not required (ScheduleAnyway): with too few nodes both pods still start.

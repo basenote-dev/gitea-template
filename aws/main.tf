@@ -50,12 +50,6 @@ locals {
   }
   gitea_admin_username = "gitea_admin"
 
-  # The Gitea version this account runs (docker.gitea.com/gitea:<version>-rootless); Helmfile
-  # deploys it. Upgrade one release at a time. The pods roll one by one, and the first new pod
-  # updates the database tables when it starts. Never go back down (Gitea can't run on tables a
-  # newer version changed); restore the database with RDS point-in-time recovery instead.
-  gitea_version = "1.26.3"
-
   # No burstable (t) classes: they run on CPU credits and slow to a crawl when the credits run
   # out, which looks like a Gitea outage. m7g.large is the smallest current Graviton m class.
   postgres_version  = "17"

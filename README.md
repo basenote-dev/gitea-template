@@ -220,13 +220,13 @@ Three files hold all of it. Read them in this order:
 
 ![Gitea's two pods, the secrets they get from Secrets Manager, and the services those secrets unlock](docs/images/runtime.svg)
 
-An upgrade is a change to one line: `gitea_version` in the locals of
-[`aws/main.tf`](aws/main.tf). Go one release at a time: 1.26.3 -> 1.26.4 -> 1.27.3 -> 28.2.0.
+An upgrade is a change to one line: `version` under `gitea` in
+[`helmfile/env/sandbox.yaml`](helmfile/env/sandbox.yaml). Go one release at a time: 1.26.3 -> 1.26.4 -> 1.27.3 -> 28.2.0.
 
 ### Method 1: from your laptop
 
 ```sh
-sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf   # GNU sed: -i without ''
+sed -i '' 's/version: "1.26.3"/version: "1.26.4"/' helmfile/env/sandbox.yaml   # GNU sed: -i without ''
 cd bootstrap
 AWS_REGION=us-west-2 terragrunt run --all apply --non-interactive
 ```
@@ -244,7 +244,7 @@ AWS_REGION=us-west-2 scripts/zero-downtime-upgrade-healthcheck.sh
 
 ```sh
 git checkout -b upgrade-gitea-1.26.4
-sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf   # GNU sed: -i without ''
+sed -i '' 's/version: "1.26.3"/version: "1.26.4"/' helmfile/env/sandbox.yaml   # GNU sed: -i without ''
 git commit -am "Upgrade Gitea 1.26.3 to 1.26.4"
 git push -u origin upgrade-gitea-1.26.4
 gh pr create --fill
@@ -252,7 +252,8 @@ gh pr checks --watch
 ```
 
 The pull request runs the plan job, which comments the OpenTofu plan and the Helm diff on the
-PR. For an upgrade it should show only the Gitea image tag changing.
+PR. For an upgrade, OpenTofu shows no changes and the Helm diff shows the Gitea image tag
+changing.
 
 Watch the upgrade: before you merge, start the health check in a second terminal, with the
 same AWS credentials and region:
