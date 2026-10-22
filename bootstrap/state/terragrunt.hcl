@@ -6,7 +6,7 @@
 #     terragrunt run --all apply --backend-bootstrap
 #
 #   With CI: this unit once from a laptop (from bootstrap/), then GitHub Actions deploys
-#     GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
+#     GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap --non-interactive -auto-approve
 #
 # root.hcl generates the AWS provider and the S3 backend, but no state encryption: this unit
 # creates the key that encryption uses.
