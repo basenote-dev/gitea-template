@@ -1,7 +1,7 @@
 # What we built
 
 What exists in this repo and in AWS, and where. Why each piece exists is in
-[architecture decisions](../explanation/architecture-decisions.md).
+[architecture decisions](../../adrs/0001-architecture-decisions.md).
 
 ## Layout
 

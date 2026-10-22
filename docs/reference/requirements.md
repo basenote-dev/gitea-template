@@ -1,7 +1,7 @@
 # Requirements
 
 How the assignment maps to this repo. Why each choice was made is in
-[architecture decisions](../explanation/architecture-decisions.md).
+[architecture decisions](../../adrs/0001-architecture-decisions.md).
 
 ## Core
 
@@ -19,7 +19,7 @@ How the assignment maps to this repo. Why each choice was made is in
 | --- | --- | --- |
 | Zero-downtime updates | Done | Rolling update of 2 pods with shared storage. Three upgrades measured with 0 failed requests (below) |
 | Filesystem and data consistency | Done | Repos on EFS, data in RDS, sessions and locks in Valkey, shared keys. Migrations run once, before the new pod serves |
-| ADR | Done | [Architecture decisions](../explanation/architecture-decisions.md) |
+| ADR | Done | [Architecture decisions](../../adrs/0001-architecture-decisions.md) |
 | Security hardening | Done | See "Security" below |
 | Baseline observability | Done | CloudWatch Container Insights, EKS control plane logs, RDS logs. Gitea metrics on, not scraped |
 | Production considerations | Documented | See "Before production" below |
