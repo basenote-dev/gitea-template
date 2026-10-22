@@ -1,4 +1,22 @@
 ################################################################################
+# Name Suffix
+################################################################################
+
+output "name" {
+  description = "gitea-<suffix>: the prefix of every name this stack gives AWS (the gitea unit reads it)"
+  value       = local.name
+}
+
+output "role_names" {
+  description = "Names of the roles the gitea unit gives EKS access entries"
+  value = {
+    github_plan        = module.github_plan_role.name
+    github_apply       = module.github_apply_role.name
+    platform_eks_admin = module.platform_eks_admin_role.name
+  }
+}
+
+################################################################################
 # State Bucket
 ################################################################################
 
@@ -8,12 +26,12 @@ output "state_bucket" {
 }
 
 output "state_kms_key_arn" {
-  description = "KMS key OpenTofu uses to encrypt state and plan files"
+  description = "KMS key OpenTofu uses to encrypt the gitea unit's state and plan files (the gitea unit reads it)"
   value       = aws_kms_key.state.arn
 }
 
 output "state_kms_key_alias" {
-  description = "Alias of the state encryption key (referenced by root.hcl)"
+  description = "Alias of the state encryption key"
   value       = aws_kms_alias.state.name
 }
 

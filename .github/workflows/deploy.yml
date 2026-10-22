@@ -144,12 +144,14 @@ jobs:
           lb() { kubectl --context gitea-sandbox --namespace gitea get "$1" --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true; }
           web=$(lb ingress/gitea)
           ssh=$(lb service/gitea-ssh)
+          admin_secret=$(aws secretsmanager list-secrets --filters Key=name,Values=gitea- \
+            --query "reverse(sort_by(SecretList[?ends_with(Name, '/admin')], &CreatedDate))[0].Name" --output text)
           {
             echo "### Gitea on the Sandbox Account"
             echo
             echo "- Web: ${web:+http://$web/}"
             echo "- SSH: ${ssh:+git@$ssh}"
-            echo "- Admin user: \`gitea_admin\` (password in AWS Secrets Manager, \`gitea/admin\`)"
+            echo "- Admin user: \`gitea_admin\` (password in AWS Secrets Manager, \`$admin_secret\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   destroy:

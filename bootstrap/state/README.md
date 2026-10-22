@@ -6,22 +6,27 @@ the roles it creates.
 
 ## What it creates
 
+The first apply picks a random 6-character suffix (`random_id.suffix`, kept in state). Every
+AWS name except the state bucket and the GitHub OIDC provider starts with `gitea-<suffix>`, so
+a rebuild never collides with names an earlier build left behind. The `gitea` unit reads the
+suffix, the key and the role names from this unit's outputs.
+
 In AWS:
 
 - S3 bucket `gitea-tfstate-<account id>-<region>` for OpenTofu state (versioned, SSE-S3,
   public access blocked, ACLs disabled, TLS only). Terragrunt creates it on
   `--backend-bootstrap`, and this unit adopts it with an `import` block.
-- KMS key `alias/gitea-tofu-state` (rotation on, `prevent_destroy`). OpenTofu encrypts the
+- KMS key `alias/gitea-<suffix>-tofu-state` (rotation on, `prevent_destroy`). OpenTofu encrypts the
   state and plan files of the `gitea` unit with it. To reuse a key kept from an earlier build of
   the account, set `EXISTING_STATE_KMS_KEY_ID=<key id>` once; otherwise a new key is created.
 - The GitHub OIDC provider and two roles:
-  - `github-plan`: ReadOnlyAccess, plus the state lockfile, the state key and reads of the
-    `gitea/*` secrets. Only the `sandbox-plan` environment can assume it.
-  - `github-apply`: AdministratorAccess. Only the `sandbox-apply` environment can assume it.
-- `platform-eks-admin`, the role people assume for `kubectl` (any admin in this account can
+  - `gitea-<suffix>-github-plan`: ReadOnlyAccess, plus the state lockfile, the state key and
+    reads of the `gitea-<suffix>/*` secrets. Only the `sandbox-plan` environment can assume it.
+  - `gitea-<suffix>-github-apply`: AdministratorAccess. Only the `sandbox-apply` environment can assume it.
+- `gitea-<suffix>-platform-eks-admin`, the role people assume for `kubectl` (any admin in this account can
   assume it; the cluster gives it admin access).
-- Secrets Manager secrets `gitea/db`, `gitea/valkey`, `gitea/admin` and `gitea/metrics` (random
-  values) and `gitea/ssh-host-key` (an ed25519 key every Gitea pod serves). All are written with
+- Secrets Manager secrets `gitea-<suffix>/db`, `/valkey`, `/admin` and `/metrics` (random
+  values), `/ssh-host-key` (an ed25519 key every Gitea pod serves) and `/app-ini-keys`. All are written with
   write-only arguments, so no value is in state or plan output.
 
 In GitHub, only when `GITHUB_TOKEN` is set (the repository is this clone's `origin` remote):

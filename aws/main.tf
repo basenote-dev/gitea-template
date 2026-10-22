@@ -15,9 +15,9 @@ data "aws_availability_zones" "available" {
 # role's real ARN (path included; a path-less ARN doesn't match), and a plan fails early if the
 # bootstrap hasn't run. No SSO roles: people assume platform-eks-admin.
 data "aws_iam_role" "this" {
-  for_each = toset(["github-apply", "github-plan", "platform-eks-admin"])
+  for_each = tomap(var.role_names) # github_plan, github_apply, platform_eks_admin
 
-  name = each.key
+  name = each.value
 }
 
 # The app secrets are created, with random values, by bootstrap/state. This stack only reads them.
@@ -28,7 +28,7 @@ data "aws_secretsmanager_secret" "this" {
 }
 
 locals {
-  name               = "gitea" # also the cluster name
+  name               = var.name # gitea-<suffix> from bootstrap/state; also the cluster name
   region             = data.aws_region.current.region
   kubernetes_version = "1.37"
 
@@ -41,12 +41,12 @@ locals {
 
   # Secrets Manager names (bootstrap/state). Their values never pass through this stack's state.
   secret_names = {
-    db           = "gitea/db"
-    valkey       = "gitea/valkey"
-    admin        = "gitea/admin"
-    metrics      = "gitea/metrics"
-    ssh_host_key = "gitea/ssh-host-key"
-    app_ini_keys = "gitea/app-ini-keys"
+    db           = "${local.name}/db"
+    valkey       = "${local.name}/valkey"
+    admin        = "${local.name}/admin"
+    metrics      = "${local.name}/metrics"
+    ssh_host_key = "${local.name}/ssh-host-key"
+    app_ini_keys = "${local.name}/app-ini-keys"
   }
   gitea_admin_username = "gitea_admin"
 
@@ -161,7 +161,7 @@ module "eks" {
   access_entries = {
     # CI deploys (OpenTofu, Helmfile).
     github-apply = {
-      principal_arn = data.aws_iam_role.this["github-apply"].arn
+      principal_arn = data.aws_iam_role.this["github_apply"].arn
       policy_associations = {
         admin = {
           policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
@@ -172,7 +172,7 @@ module "eks" {
 
     # People and break-glass: assume it from an admin session (see the kubeconfig_command output).
     platform-eks-admin = {
-      principal_arn = data.aws_iam_role.this["platform-eks-admin"].arn
+      principal_arn = data.aws_iam_role.this["platform_eks_admin"].arn
       policy_associations = {
         admin = {
           policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
@@ -183,7 +183,7 @@ module "eks" {
 
     # CI plans: `helmfile diff` reads live releases, read-only.
     github-plan = {
-      principal_arn = data.aws_iam_role.this["github-plan"].arn
+      principal_arn = data.aws_iam_role.this["github_plan"].arn
       policy_associations = {
         view = {
           policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy"

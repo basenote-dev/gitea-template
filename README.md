@@ -60,8 +60,10 @@ template), so pushing first is harmless.
 ## What `terragrunt run --all apply` does
 
 1. Terragrunt creates the S3 bucket for OpenTofu state (`--backend-bootstrap`).
-2. The `state/` unit creates the KMS key that encrypts the state, the GitHub OIDC roles, the
-   `platform-eks-admin` role for `kubectl`, and the `gitea/*` secrets with random values. With
+2. The `state/` unit picks a random suffix that every AWS name gets (`gitea-<suffix>`), so a
+   rebuild never collides with names an earlier build left behind. Then it creates the KMS key
+   that encrypts the state, the GitHub OIDC roles, the `platform-eks-admin` role for
+   `kubectl`, and the `gitea-<suffix>/*` secrets with random values. With
    `GITHUB_TOKEN` set, it also adds the GitHub environments and variables.
 3. The `gitea/` unit runs the OpenTofu in `aws/`: VPC, EKS Auto Mode cluster, RDS PostgreSQL,
    Valkey, EFS (about 20 minutes).
@@ -141,4 +143,3 @@ single to save cost. A Gitea upgrade touches none of them. Each has a known prod
 - Valkey is a single node. If it restarts, users are logged out and queued jobs are lost.
 - HTTP only, on the load balancers' own hostnames. A domain would add HTTPS and a real SSH
   clone URL (Gitea's UI shows `git@localhost:...` without one).
-- Auto Mode's EC2 nodes don't carry the cost-allocation tags.
