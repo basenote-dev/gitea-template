@@ -8,8 +8,8 @@ aws/         OpenTofu: VPC, EKS, RDS, Valkey, EFS
 helmfile/    everything inside the cluster (Gitea, External Secrets)
 bootstrap/   Terragrunt config that ties it together, plus the one-time state/ setup
 scripts/     the zero-downtime health check
-adrs/        architecture decision records
-docs/        reference docs, diagrams
+adrs/        the architecture decision record
+docs/images/ diagrams
 .mise.toml   pinned tool versions (mise install)
 modules/     vendored terraform-aws-modules
 ```
@@ -20,8 +20,7 @@ modules/     vendored terraform-aws-modules
 | --- | --- | --- |
 | Tutorial | This README, from "Get your own copy" to "Method 2" | Deploy Gitea the first time |
 | How-to guides | This README: "Upgrade Gitea", "Tear down" | Upgrade without downtime, remove everything |
-| Reference | [Requirements](docs/reference/requirements.md), [What we built](docs/reference/what-we-built.md) | See what the assignment asked for and what exists |
-| Explanation | [Architecture decisions](adrs/0001-architecture-decisions.md) | Understand why it's built this way |
+| Explanation and reference | [Architecture Decision Record](adrs/architecture-decision-record.md) | See what the assignment asked for, why it's built this way, and the test results |
 
 ## Before you start
 
@@ -188,7 +187,7 @@ ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 ```
 
 Add the cluster to `~/.kube/config`. It assumes the `platform-eks-admin` role, which is how
-people get cluster admin (see [ADR 0001](adrs/0001-architecture-decisions.md#no-stored-aws-keys)):
+people get cluster admin (see the [ADR](adrs/architecture-decision-record.md#no-stored-aws-keys)):
 
 ```sh
 aws eks update-kubeconfig --name "${CLUSTER}" --alias "${CLUSTER}" \
@@ -337,7 +336,7 @@ To roll back, don't lower the version. Gitea can't run on tables a newer version
 Restore the database with RDS point-in-time recovery instead.
 
 Why each rollout setting is there:
-[architecture decisions](adrs/0001-architecture-decisions.md#zero-downtime-rollout-settings).
+[architecture decisions](adrs/architecture-decision-record.md#zero-downtime-rollout-settings).
 
 ## Tear down
 

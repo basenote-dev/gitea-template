@@ -1,8 +1,31 @@
-# ADR 0001: Architecture decisions
+# Architecture Decision Record
 
 Why the stack is built the way it is. Each section is one decision: what we needed, what we
-chose, and what we turned down. For what exists and where, see the
-[reference docs](../docs/reference/).
+chose, and what we turned down.
+
+## What the assignment asked for
+
+### Core
+
+| Requirement | Status | How |
+| --- | --- | --- |
+| Gitea on a cloud provider | Done | AWS, us-west-2 by default |
+| Containerized host | Done | EKS Auto Mode cluster, Gitea in 2 pods (official Helm chart, rootless image) |
+| PostgreSQL, external and networked | Done | RDS PostgreSQL 17, private subnets, TLS only |
+| Reverse proxy | Done | ALB for HTTP (Kubernetes Ingress), NLB for SSH |
+| IaC with Terraform and Ansible | Done, with a change | OpenTofu (Terraform-compatible) plus Terragrunt and Helmfile. No Ansible: there are no servers to configure |
+
+### Stretch
+
+| Goal | Status | How |
+| --- | --- | --- |
+| Zero-downtime updates | Done | Rolling update of 2 pods with shared storage. Three upgrades measured with 0 failed requests (see "Upgrade tests") |
+| Filesystem and data consistency | Done | Repos on EFS, data in RDS, sessions and locks in Valkey, shared keys. Migrations run once, before the new pod serves |
+| ADR | Done | This document |
+| Security hardening | Done | See "Security enhancements" below |
+| Baseline observability | Done | CloudWatch Container Insights, EKS control plane logs, RDS logs. Gitea metrics on, not scraped |
+| Production considerations | Documented | See "Before production" below |
+| "yoink" in a code comment | Done | `helmfile/helmfile.yaml.gotmpl` |
 
 ## Run Gitea on EKS Auto Mode
 
@@ -98,11 +121,48 @@ Every setting below closes one way a request could fail during an upgrade.
 | 300 s graceful shutdown, 300 s load balancer drain, 360 s grace period | Long clones and pushes are cut when the pod exits |
 | Disruption budget `minAvailable: 1` | A node replacement could take both pods at once |
 
-A database migration runs in the first new pod's init container before Gitea starts. The old
-pods keep working on the migrated tables. If the migration fails, the new pod never becomes
-ready and the old pods keep serving. Rolling back means restoring the database to before the
-upgrade with RDS point-in-time recovery, because Gitea won't start on tables a newer version
-changed.
+### How a new pod proves it's ready
+
+![The six steps a new Gitea pod goes through before it gets traffic](../docs/images/pod-startup.svg)
+
+A pod gets traffic only after three checks pass, in this order:
+
+1. Its init containers finish. The last one, `configure-gitea`, runs `gitea migrate` and then
+   creates or updates the admin user. Gitea itself doesn't start until they're done.
+2. The readiness probe passes. Kubernetes calls `GET /api/v1/version` every 10 seconds, and 3
+   failures in a row mark the pod not ready again. That endpoint answers only when Gitea and its
+   database connection work. The chart's stock probe only opens a TCP connection to the port,
+   which also succeeds on a Gitea that's up but broken.
+3. The readiness gates pass. EKS Auto Mode adds one gate per load balancer, and each turns true
+   only when the ALB (checking `/api/healthz`) or the NLB (checking the SSH port) sees the pod as
+   healthy. Without the gates, Kubernetes could call the pod ready while the load balancers
+   still send it nothing, and stop an old pod too early.
+
+Only then does Kubernetes stop one old pod, and `maxUnavailable: 0` means it never stops one
+before that.
+
+The liveness probe is separate. It opens a TCP connection to the HTTP port, starting 200
+seconds after the pod starts, and 10 failures in a row restart the container. It catches a
+Gitea that has hung, and it has no say in who gets traffic.
+
+### Database migrations
+
+The first new pod's `configure-gitea` runs `gitea migrate` before Gitea starts. If the new
+version changes the tables, this is where it happens, while the old pods keep serving. Gitea
+versions are built so the old version keeps working on the migrated tables until it's
+replaced, and both upgrade tests confirmed that. With `maxSurge: 1` only one new pod starts at
+a time, so the second new pod finds nothing left to migrate.
+
+If the migration fails, `configure-gitea` retries and the pod never becomes ready. No old pod
+is stopped, the old pods keep serving, and the deploy fails in CI.
+
+The init containers run on every pod start: an upgrade, a `kubectl rollout restart`, a node
+replacement or a scale-up. That's harmless. When the tables already match the running version,
+`gitea migrate` checks and exits without changing anything, and the admin step only re-syncs
+the password from Secrets Manager.
+
+To roll back, restore the database to before the upgrade with RDS point-in-time recovery.
+Lowering the version doesn't work, because Gitea won't start on tables a newer version changed.
 
 ## Fixes for a brand-new install
 
@@ -194,6 +254,35 @@ more for a demo.
 ## Kept small to save cost
 
 The demo is about upgrades without downtime, so the parts an upgrade never touches are single:
-one RDS instance in one AZ, one Valkey node, one NAT gateway, and no domain. The
-[requirements reference](../docs/reference/requirements.md) lists what each would take for
-production.
+one RDS instance in one AZ, one Valkey node, one NAT gateway, and no domain. "Before production"
+below lists what each would take.
+
+## Upgrade tests
+
+`scripts/zero-downtime-upgrade-healthcheck.sh` ran from before each merge until after the last
+pod was replaced. It checks `/api/healthz` every second, and every 1 to 3 seconds it runs
+`git ls-remote` over HTTP and SSH, pushes a commit over SSH, and creates an issue through the
+API.
+
+| Upgrade | Checks | Failed |
+| --- | --- | --- |
+| 1.26.3 to 1.27.3 (minor) | 829 | 0 |
+| 1.27.3 to 28.2.0 (major) | 866 | 0 |
+| 1.26.3 to 1.26.4 (patch) | 960 | 0 |
+
+A gap shorter than the check interval could fall between two checks.
+
+## Before production
+
+| Gap in the demo | What production would do |
+| --- | --- |
+| HTTP only, no domain | A domain, an ACM certificate on the ALB, and a real SSH clone URL |
+| RDS in one AZ | Multi-AZ (about 40 seconds of failover instead of minutes), RDS Proxy to absorb failovers |
+| One Valkey node | A replica with automatic failover |
+| Pods can share a node | Require spreading across nodes and AZs |
+| `allowed_cidrs` is open to the internet | Limit it, and add AWS WAF on the ALB |
+| Public EKS API endpoint | Private endpoint, or a list of allowed CIDRs |
+| CI deploy role is a full admin | Scope it to the services the stack uses |
+| Every account admin is cluster admin | A read-only role for most people |
+| Nothing scrapes Gitea's metrics | Prometheus and Grafana, with alerts on health checks, database and cache |
+| One environment | Separate staging and production accounts, promoted through the same pipeline |
