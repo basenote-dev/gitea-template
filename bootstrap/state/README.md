@@ -48,7 +48,7 @@ In GitHub, only when `GITHUB_TOKEN` is set (the repository is this clone's `orig
 From `bootstrap/`:
 
 ```sh
-GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
+GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap --non-interactive -auto-approve
 ```
 
 `--backend-bootstrap` creates the state bucket before OpenTofu starts, so this unit's own state

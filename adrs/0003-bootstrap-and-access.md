@@ -9,7 +9,7 @@ bootstrap, run from a laptop with admin credentials, creates what the pipeline n
 
 ```sh
 cd bootstrap
-GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
+GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap --non-interactive -auto-approve
 ```
 
 ## What the bootstrap creates

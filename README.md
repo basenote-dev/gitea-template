@@ -123,8 +123,11 @@ Then bootstrap:
 mise trust
 mise install
 cd bootstrap
-AWS_REGION=us-west-2 GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
+AWS_REGION=us-west-2 GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap --non-interactive -auto-approve
 ```
+
+`-auto-approve` skips OpenTofu's "Enter a value: yes" prompt, and `--non-interactive` skips
+Terragrunt's own prompts.
 
 Then start the first deploy: Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Apply`.
 After that, every pull request gets a plan comment (OpenTofu plan and Helm diff), and every
