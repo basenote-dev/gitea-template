@@ -1,8 +1,8 @@
-# Architecture decisions
+# ADR 0001: Architecture decisions
 
 Why the stack is built the way it is. Each section is one decision: what we needed, what we
 chose, and what we turned down. For what exists and where, see the
-[reference docs](../reference/).
+[reference docs](../docs/reference/).
 
 ## Run Gitea on EKS Auto Mode
 
@@ -153,5 +153,5 @@ more for a demo.
 
 The demo is about upgrades without downtime, so the parts an upgrade never touches are single:
 one RDS instance in one AZ, one Valkey node, one NAT gateway, and no domain. The
-[requirements reference](../reference/requirements.md) lists what each would take for
+[requirements reference](../docs/reference/requirements.md) lists what each would take for
 production.

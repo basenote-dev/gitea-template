@@ -26,7 +26,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "docs/**"]
+    paths-ignore: ["**.md", "docs/**", "adrs/**"]
   workflow_dispatch:
     inputs:
       action:
