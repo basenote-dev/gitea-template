@@ -384,13 +384,15 @@ has a known production fix.
 Every step of method 2, filled in for the demo (AWS profile `cologne-catalog-production`, GitHub
 user `basenote-dev`), in blocks that paste as they are.
 
-Log in:
+### Log in
 
 ```sh
 export AWS_PROFILE=cologne-catalog-production
 aws sso login
 gh auth login
 ```
+
+### Deploy
 
 Create your repo, bootstrap it, and start the first deploy:
 
@@ -408,7 +410,28 @@ sleep 10
 gh run watch -R $GH_USERNAME/gitea-deployment
 ```
 
-Upgrade Gitea to show a zero-downtime deploy. First, in a second terminal, start the health
+### Connect to the cluster (optional)
+
+Show the pods, the URLs and the admin password:
+
+```sh
+export AWS_PROFILE=cologne-catalog-production AWS_REGION=us-west-2
+CLUSTER=$(aws eks list-clusters --query "clusters[?starts_with(@, 'gitea-')] | [0]" --output text)
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+aws eks update-kubeconfig --name "${CLUSTER}" --alias "${CLUSTER}" \
+  --role-arn "arn:aws:iam::${ACCOUNT}:role/${CLUSTER}-platform-eks-admin"
+kubectl get pods -n gitea -o wide
+kubectl get ingress gitea -n gitea -o jsonpath='http://{.status.loadBalancer.ingress[0].hostname}/{"\n"}'
+kubectl get service gitea-ssh -n gitea -o jsonpath='git@{.status.loadBalancer.ingress[0].hostname}{"\n"}'
+aws secretsmanager get-secret-value --secret-id "${CLUSTER}/admin" --query SecretString --output text
+kubectl exec -n gitea deploy/gitea -c gitea -- id
+```
+
+The last command shows Gitea running as `uid=1000(git)`, not root.
+
+### Zero downtime deployment
+
+Upgrade Gitea while the health check runs. First, in a second terminal, start the health
 check and leave it running:
 
 ```sh
@@ -439,24 +462,7 @@ from `1.26.3-rootless` to `1.26.4-rootless`). After the merge, the pods roll one
 Leave the health check running a minute after the run finishes, then press Ctrl-C: every
 check's failure count should be 0.
 
-Connect to the cluster (optional), to show the pods, the URLs and the admin password:
-
-```sh
-export AWS_PROFILE=cologne-catalog-production AWS_REGION=us-west-2
-CLUSTER=$(aws eks list-clusters --query "clusters[?starts_with(@, 'gitea-')] | [0]" --output text)
-ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-aws eks update-kubeconfig --name "${CLUSTER}" --alias "${CLUSTER}" \
-  --role-arn "arn:aws:iam::${ACCOUNT}:role/${CLUSTER}-platform-eks-admin"
-kubectl get pods -n gitea -o wide
-kubectl get ingress gitea -n gitea -o jsonpath='http://{.status.loadBalancer.ingress[0].hostname}/{"\n"}'
-kubectl get service gitea-ssh -n gitea -o jsonpath='git@{.status.loadBalancer.ingress[0].hostname}{"\n"}'
-aws secretsmanager get-secret-value --secret-id "${CLUSTER}/admin" --query SecretString --output text
-kubectl exec -n gitea deploy/gitea -c gitea -- id
-```
-
-The last command shows Gitea running as `uid=1000(git)`, not root.
-
-Tear it down:
+### Tear down
 
 ```sh
 export GH_USERNAME=basenote-dev
