@@ -474,13 +474,17 @@ gh run watch -R $GH_USERNAME/gitea-deployment
 ### Delete the state key
 
 Only when you're done for good: the next deploy can't read the old state without this key.
-It looks the key up by its alias, so the suffix doesn't matter:
+It finds every state key by its alias and schedules the ones still in use, skipping keys from
+earlier builds that are already waiting to be deleted:
 
 ```sh
 export AWS_PROFILE=cologne-catalog-production AWS_REGION=us-west-2
-ALIAS=$(aws kms list-aliases --query "Aliases[?starts_with(AliasName, 'alias/gitea-') && ends_with(AliasName, '-tofu-state')].AliasName | [0]" --output text)
-aws kms schedule-key-deletion --pending-window-in-days 7 \
-  --key-id "$(aws kms describe-key --key-id "${ALIAS}" --query KeyMetadata.KeyId --output text)"
+for ALIAS in $(aws kms list-aliases --query "Aliases[?starts_with(AliasName, 'alias/gitea-') && ends_with(AliasName, '-tofu-state')].AliasName" --output text); do
+  read KEY STATE <<< "$(aws kms describe-key --key-id "$ALIAS" --query "KeyMetadata.[KeyId,KeyState]" --output text)"
+  if [ "$STATE" = Enabled ]; then
+    aws kms schedule-key-deletion --key-id "$KEY" --pending-window-in-days 7
+  fi
+done
 ```
 
 7 days is the shortest wait AWS allows. The key doesn't bill while it waits.
