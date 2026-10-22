@@ -120,18 +120,73 @@ ran. It has a copy of `aws/` plus the three files Terragrunt wrote: `backend.tf`
 Add `--log-level debug` to any command to see every command Terragrunt runs: `tofu init`,
 `tofu apply` and each hook.
 
-## What a Gitea upgrade does
+## Upgrade Gitea
 
 ![Gitea's two pods, the secrets they get from Secrets Manager, and the services those secrets unlock](docs/images/runtime.svg)
 
-1. Change `gitea_version` in `aws/main.tf` in a pull request, one release at a time
-   (1.26.3 -> 1.26.4 -> 1.27.3 -> 28.2.0).
-2. The PR's plan comment shows the change. Merge it.
-3. Helm starts one new pod. It gets traffic only after the load balancers see it healthy.
-4. One old pod is told to stop. It serves 60 more seconds while traffic moves off it. Then it
+An upgrade is a change to one line: `gitea_version` in the locals of
+[`aws/main.tf`](aws/main.tf). Go one release at a time: 1.26.3 -> 1.26.4 -> 1.27.3 -> 28.2.0.
+Start the health check below first, so it sees the whole rollout.
+
+### Watch it
+
+In a separate terminal, with the same AWS credentials and region as the deploy:
+
+```sh
+scripts/zero-downtime-upgrade-healthcheck.sh
+```
+
+It needs only the AWS CLI, git and curl. It finds the load balancers by their tags, logs in as
+the admin, and makes a test repo and a temporary SSH key. Then five loops hit Gitea every 1 to 3
+seconds: `/api/healthz`, `git ls-remote` over HTTP and SSH, a push over SSH, and an issue created
+through the API. Every 5 seconds it prints each check's last result and its ok/fail count:
+
+```
+04:12:20  healthz ok       9/0  https-ls-remote ok       3/0  ssh-ls-remote ok       3/0  ssh-push ok       2/0  api-write ok       3/0
+```
+
+The second number is failures and should stay at 0. Leave it running a minute after the
+rollout ends, then press Ctrl-C. It prints the totals and the time of any failure, and keeps
+every result in `zero-downtime-healthcheck-<time>.log`.
+
+### With a pull request (method 2)
+
+```sh
+git checkout -b upgrade-gitea-1.26.4
+sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf   # GNU sed: -i without ''
+git commit -am "Upgrade Gitea 1.26.3 to 1.26.4"
+git push -u origin upgrade-gitea-1.26.4
+gh pr create --fill
+gh pr checks --watch
+```
+
+The pull request runs the plan job, which comments the OpenTofu plan and the Helm diff on the
+PR. For an upgrade it should show only the Gitea image tag changing. Then merge it:
+
+```sh
+gh pr merge --squash --delete-branch
+gh run watch
+```
+
+The merge to `main` runs the apply job, and the pods roll one at a time.
+
+### From your laptop (method 1)
+
+```sh
+sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf
+cd bootstrap
+terragrunt run --all apply --non-interactive
+```
+
+Only the Helm release changes, so the apply takes a few minutes.
+
+### What happens during the rollout
+
+1. Helm starts one new pod. It gets traffic only after the load balancers see it healthy.
+2. One old pod is told to stop. It serves 60 more seconds while traffic moves off it. Then it
    finishes open git operations and exits.
-5. The same happens for the second pod. One pod is always serving.
-6. On a minor or major upgrade, the first new pod updates the database tables. The old pod
+3. The same happens for the second pod. One pod is always serving.
+4. On a minor or major upgrade, the first new pod updates the database tables. The old pod
    keeps working meanwhile.
 
 The pods can swap one at a time because they share all data. Repos are on EFS. Users and
@@ -145,27 +200,6 @@ Everything we built on top of the stock modules and charts:
 [adrs/0002-what-we-built.md](adrs/0002-what-we-built.md).
 What the bootstrap creates, and how pipelines and `kubectl` log in:
 [adrs/0003-bootstrap-and-access.md](adrs/0003-bootstrap-and-access.md).
-
-## Watch a zero-downtime upgrade
-
-Run this from your laptop, with the same AWS credentials and region (us-west-2 unless
-`AWS_REGION` is set), while a rollout happens:
-
-```sh
-scripts/zero-downtime-upgrade-healthcheck.sh
-```
-
-It needs only the AWS CLI, git and curl. It finds the load balancers by their tags. It logs in
-as the admin and makes a test repo and a temporary SSH key. Then five loops hit Gitea every 1-3
-seconds: `/api/healthz`, `git ls-remote` over HTTP and SSH, a push over SSH, and an issue created
-through the API. Every 5 seconds it prints each check's last result and ok/fail count:
-
-```
-04:12:20  healthz ok       9/0  https-ls-remote ok       3/0  ssh-ls-remote ok       3/0  ssh-push ok       2/0  api-write ok       3/0
-```
-
-Start it, merge an upgrade PR, and watch the counts. Ctrl-C prints the totals and the time of
-any failure. Every result is kept in `zero-downtime-healthcheck-<time>.log`.
 
 ## Demo limitations
 
