@@ -76,7 +76,7 @@ locals {
     efs      = 2049
   }
 
-  log_retention_days       = 30 # EKS control plane, Container Insights, VPC flow logs, RDS
+  log_retention_days       = 30 # EKS control plane, Container Insights, RDS
   db_backup_retention_days = 7  # RDS point-in-time recovery window
 }
 
@@ -121,12 +121,7 @@ module "vpc" {
   default_security_group_ingress = []
   default_security_group_egress  = []
 
-  # Who talked to whom, for incident response.
-  enable_flow_log                                 = true
-  create_flow_log_cloudwatch_log_group            = true
-  create_flow_log_cloudwatch_iam_role             = true
-  flow_log_cloudwatch_log_group_retention_in_days = local.log_retention_days
-  flow_log_max_aggregation_interval               = 60
+  # No VPC flow logs: they cost per GB logged and the demo doesn't need them.
 }
 
 ################################################################################
