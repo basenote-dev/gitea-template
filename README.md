@@ -26,11 +26,33 @@ modules/     vendored terraform-aws-modules
   `USE_EXISTING_GITHUB_OIDC_PROVIDER=true`. AWS allows only one, and we reuse it without
   managing it. Check with `aws iam list-open-id-connect-providers`.
 
+## Get your own copy
+
+Deploy from your own repo, not from this template. Pull requests and deploys then happen in
+your repo, and the template stays as it is.
+
+Start a new repo from the template:
+
+```sh
+gh repo create <you>/gitea-deployment --template basenote-dev/gitea-template --public --clone
+cd gitea-deployment
+```
+
+Or fill a repo you already created empty on GitHub:
+
+```sh
+git clone https://github.com/<you>/gitea-deployment.git
+cd gitea-deployment
+git remote add template https://github.com/basenote-dev/gitea-template.git
+git pull template main
+git push -u origin main
+```
+
+Run everything below from that folder.
+
 ## Method 1: everything from your laptop
 
 ```sh
-git clone https://github.com/basenote-dev/gitea-template.git
-cd gitea-template
 mise trust
 mise install
 cd bootstrap
@@ -45,8 +67,6 @@ To remove it, see [Tear down](#tear-down).
 ## Method 2: bootstrap from your laptop, then GitHub Actions deploys
 
 ```sh
-git clone <your copy of this repo>
-cd <it>
 mise trust
 mise install
 cd bootstrap
