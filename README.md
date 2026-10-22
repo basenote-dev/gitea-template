@@ -129,9 +129,20 @@ AWS_REGION=us-west-2 GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-di
 `-auto-approve` skips OpenTofu's "Enter a value: yes" prompt, and `--non-interactive` skips
 Terragrunt's own prompts.
 
-Then start the first deploy: Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Apply`.
-After that, every pull request gets a plan comment (OpenTofu plan and Helm diff), and every
-merge to `main` deploys it. To remove it, see [Tear down](#tear-down).
+The bootstrap only sets up the account and the repo. Nothing is deployed yet. Start the
+first deploy once, from GitHub Actions:
+
+```sh
+gh workflow run deploy.yml -R <your-github-username>/gitea-deployment -f action="OpenTofu Apply"
+gh run watch -R <your-github-username>/gitea-deployment
+```
+
+(Or in the browser: Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Apply`.) It runs the
+same apply as method 1 and takes about 25 minutes. The run's summary shows the Gitea URL and
+SSH host.
+
+From then on, changes go through pull requests: each PR gets a plan comment (OpenTofu plan and
+Helm diff), and each merge to `main` deploys it. To remove it, see [Tear down](#tear-down).
 
 The workflow does nothing in a repository the bootstrap hasn't run for (a fresh clone, or this
 template), so pushing first is harmless.
