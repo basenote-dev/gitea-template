@@ -35,7 +35,7 @@ with `AlreadyExists` on them. With the suffix, a new build never collides with a
 | S3 bucket | `gitea-tfstate-<account>-<region>` | Holds OpenTofu state. Terragrunt creates it empty (`--backend-bootstrap`), then this unit adopts it and locks it down: versioning, encryption, no public access, TLS only |
 | KMS key | `alias/gitea-<suffix>-tofu-state` | Encrypts state and plan files. Has `prevent_destroy`, so a teardown never deletes it by accident |
 | GitHub OIDC provider | `token.actions.githubusercontent.com` | Lets AWS trust tokens that GitHub signs. Skipped with `USE_EXISTING_GITHUB_OIDC_PROVIDER=true` if the account already has one |
-| IAM role | `gitea-<suffix>-github-plan` | Pipeline plans. Read-only, plus the state lock file, the state key, and reading `gitea/*` secrets |
+| IAM role | `gitea-<suffix>-github-plan` | Pipeline plans. Read-only, plus the state lock file, the state key, and reading `gitea-<suffix>/*` secrets |
 | IAM role | `gitea-<suffix>-github-apply` | Pipeline deploys. Admin |
 | IAM role | `gitea-<suffix>-platform-eks-admin` | People's way into the cluster |
 | Secrets | `gitea-<suffix>/db`, `/valkey`, `/admin`, `/metrics` | Random passwords. Write-only, so they never land in state or plan output |
@@ -65,7 +65,7 @@ No AWS keys are stored in GitHub. Each run gets short-lived credentials instead.
    `aud` must be `sts.amazonaws.com`, and `sub` must match exactly.
 5. STS returns credentials that last about an hour.
 
-The `sub` check is what keeps other repos out. A fork, or another repo in the same org, sends a
+The `sub` check keeps other repos out. A fork, or another repo in the same org, sends a
 different `sub`, so STS refuses it. A pull request branch can't use `sandbox-apply`, because
 GitHub only lets `main` deploy to that environment. So a PR can plan, but only a merge can
 deploy.
@@ -139,6 +139,10 @@ GitHub's OIDC provider there, and AWS allows only one per URL. We didn't want to
 our teardown would then delete it. Now `USE_EXISTING_GITHUB_OIDC_PROVIDER=true` makes our roles
 trust the existing provider without managing it. After that, plans, deploys, both upgrades and
 the destroy all logged in over OIDC, and `kubectl` worked through `platform-eks-admin`.
+
+A later rebuild in that account failed on `alias/gitea-tofu-state`. An earlier build had left
+it behind, and its key was still waiting out the deletion window. That led to the random name
+suffix described above.
 
 ## Trade-offs
 
