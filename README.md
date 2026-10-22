@@ -59,17 +59,61 @@ template), so pushing first is harmless.
 
 ## What `terragrunt run --all apply` does
 
-1. Terragrunt creates the S3 bucket for OpenTofu state (`--backend-bootstrap`).
-2. The `state/` unit picks a random suffix that every AWS name gets (`gitea-<suffix>`), so a
-   rebuild never collides with names an earlier build left behind. Then it creates the KMS key
-   that encrypts the state, the GitHub OIDC roles, the `platform-eks-admin` role for
-   `kubectl`, and the `gitea-<suffix>/*` secrets with random values. With
-   `GITHUB_TOKEN` set, it also adds the GitHub environments and variables.
-3. The `gitea/` unit runs the OpenTofu in `aws/`: VPC, EKS Auto Mode cluster, RDS PostgreSQL,
-   Valkey, EFS (about 20 minutes).
-4. Its hook runs `helmfile apply`: External Secrets (copies the secrets into the cluster), the
-   EFS volume and load balancer settings, then Gitea with 2 pods.
-5. It prints the Gitea URL and SSH host.
+Terragrunt creates nothing itself. It writes a few files into each unit, runs `tofu` in the
+units in the right order, and runs commands before and after (hooks). There are two units:
+`state/` runs first and `gitea/` second, because `gitea/` reads `state/`'s outputs. With method
+2, you run step 2 from your laptop and GitHub Actions runs steps 3 and 4.
+
+1. Terragrunt creates the empty S3 bucket for OpenTofu state (`--backend-bootstrap`).
+2. `state/` runs `tofu apply` on `bootstrap/state/`, which takes about a minute. It creates:
+   - A random suffix. Every AWS name below starts with `gitea-<suffix>`, so a rebuild never
+     collides with names an earlier build left behind.
+   - The KMS key that encrypts the gitea unit's state.
+   - The GitHub OIDC provider and the `github-plan` and `github-apply` roles.
+   - The `platform-eks-admin` role for `kubectl`.
+   - The Secrets Manager secrets, with random values: database password, Valkey token, admin
+     password, metrics token, SSH host key and Gitea's signing keys.
+   - With `GITHUB_TOKEN` set, the GitHub environments and variables.
+3. `gitea/` reads those outputs (suffix, key, role names), then runs `tofu apply` on `aws/`,
+   which takes about 20 minutes. It creates the VPC, the EKS Auto Mode cluster, RDS
+   PostgreSQL, Valkey and EFS. RDS and Valkey read their passwords from the secrets made in
+   step 2, which is why `state/` has to run first.
+4. Hooks in `bootstrap/gitea/terragrunt.hcl` run after that apply:
+   1. `aws eks update-kubeconfig` adds the cluster to `~/.kube/config`.
+   2. `helmfile apply` installs External Secrets (it copies the secrets into the cluster), the
+      EFS volume and load balancer settings, then Gitea with 2 pods.
+   3. `kubectl wait` waits for the load balancers, then the URL and SSH host are printed.
+
+### Where the Terragrunt config lives
+
+Three files hold all of it. Read them in this order:
+
+1. `bootstrap/root.hcl` is shared by both units. `remote_state` says which bucket holds state,
+   and `generate "provider"` writes the AWS provider into each unit.
+2. `bootstrap/state/terragrunt.hcl`: `terraform { source }` says which OpenTofu folder the unit
+   runs, and `inputs` are the variables it passes.
+3. `bootstrap/gitea/terragrunt.hcl` does the same for the gitea unit. It also has
+   `dependency "state"` (reads `state/`'s outputs, so `state/` runs first),
+   `generate "encryption"`, and the hooks from step 4.
+
+### See what it does
+
+Run these from `bootstrap/`:
+
+```sh
+terragrunt dag graph                    # run order; "gitea" -> "state" means gitea needs state
+terragrunt render --working-dir gitea   # the gitea unit's config with every value filled in
+```
+
+`render` needs `state/` applied first. It shows the `inputs` with the real suffix and role
+names, and the generated `encryption.tf` with the real KMS key ARN.
+
+After a run, `gitea/.terragrunt-cache/<hash>/<hash>/aws/` is the folder where `tofu` really
+ran. It has a copy of `aws/` plus the three files Terragrunt wrote: `backend.tf`,
+`provider.tf` and `encryption.tf`.
+
+Add `--log-level debug` to any command to see every command Terragrunt runs: `tofu init`,
+`tofu apply` and each hook.
 
 ## What a Gitea upgrade does
 
