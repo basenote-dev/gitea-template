@@ -1,0 +1,13 @@
+# Gitea's claim on the shared EFS volume (charts/gitea-cluster); both pods mount it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitea-shared-storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-static
+  volumeName: gitea-efs
+  resources:
+    requests:
+      storage: 100Gi

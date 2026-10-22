@@ -1,0 +1,3 @@
+efsVolumeHandle: ""        # <file-system-id>::<access-point-id>, from OpenTofu
+groupName: ""              # one shared ALB per account
+inboundCidrs: ["0.0.0.0/0"]

@@ -1,0 +1,31 @@
+# The "alb" IngressClass for EKS Auto Mode's load balancer controller. Every Ingress using it
+# joins one shared, internet-facing ALB (group), HTTP only since there is no domain or
+# certificate.
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: alb
+spec:
+  scheme: internet-facing
+  group:
+    name: {{ required "groupName is required" .Values.groupName | quote }}
+  inboundCIDRs:
+    {{- toYaml .Values.inboundCidrs | nindent 4 }}
+  loadBalancerAttributes:
+    - key: routing.http.drop_invalid_header_fields.enabled
+      value: "true"
+    - key: idle_timeout.timeout_seconds
+      value: "300" # long git-over-HTTP pushes
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: alb

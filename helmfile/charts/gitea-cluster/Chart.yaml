@@ -1,0 +1,5 @@
+apiVersion: v2
+name: gitea-cluster
+description: "Cluster-scoped objects for Gitea: namespace, EFS PersistentVolume, ALB IngressClass."
+type: application
+version: 0.1.0

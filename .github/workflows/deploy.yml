@@ -1,0 +1,255 @@
+# GitOps for the whole stack. Every job runs the same single command a laptop would, in bootstrap/:
+#
+#   terragrunt run --all plan|apply|destroy
+#
+# Terragrunt runs the gitea/ unit (OpenTofu in aws/, then Helmfile from its hooks). CI skips the
+# state/ unit; a person runs it once from a laptop.
+#
+#   pull request          -> plan, posted as two PR comments: the OpenTofu plan and the Helm diff
+#   merge to main         -> apply
+#   manual run (Actions)  -> plan, apply or destroy
+#
+# Two GitHub environments, each with variable AWS_ROLE_ARN pointing at an OIDC role made by
+# bootstrap/state:
+#   sandbox-plan  (any branch) -> github-plan  (read-only)
+#   sandbox-apply (main only)  -> github-apply (AdministratorAccess)
+# Each IAM role trusts only its own environment, so a branch can never get write access. There
+# are no static AWS keys anywhere.
+name: Gitea Deploy
+# What each run shows in the Actions list: the PR or commit it is for, or who started it.
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('OpenTofu Plan · #{0} {1}', github.event.pull_request.number, github.event.pull_request.title)
+  || github.event_name == 'push' && format('OpenTofu Apply · {0}', github.event.head_commit.message)
+  || format('{0} (Manual) · started by {1}', inputs.action, github.actor) }}
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "adrs/**"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Which pipeline to run against the sandbox account
+        type: choice
+        options: [OpenTofu Plan, OpenTofu Apply, OpenTofu Destroy]
+        default: OpenTofu Plan
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  TG_NON_INTERACTIVE: "true"
+  TG_NO_COLOR: "true"
+  # Plain OpenTofu output instead of Terragrunt's log wrapping: readable in logs and PR comments.
+  TG_TF_FORWARD_STDOUT: "true"
+  MISE_YES: "1"
+
+# Every job waits for bootstrap/state, which sets the repo variable BOOTSTRAPPED. Until then (a
+# fresh clone, or the template) pushes and pull requests run nothing.
+jobs:
+  plan:
+    name: OpenTofu Plan + Helm Diff
+    if: >-
+      vars.BOOTSTRAPPED == 'true' && (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_dispatch' && inputs.action == 'OpenTofu Plan')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: sandbox-plan
+    # A newer commit on the same PR supersedes an older plan. Plans never queue behind (or
+    # displace) applies: they wait for the state lock instead (-lock-timeout in terragrunt.hcl).
+    concurrency:
+      group: plan-sandbox-${{ github.head_ref || github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write       # OIDC
+      pull-requests: write  # plan comment
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Pinned Tools (OpenTofu, Terragrunt, Helm, Helmfile, kubectl)
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
+        with:
+          install: true
+          cache: true
+
+      - name: Assume AWS Role github-plan via OIDC (Read-Only)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The plan runs Terragrunt directly (not terragrunt-action) so the PR comment can hold just
+      # the plan. -concise drops the "Refreshing state..." lines.
+      - name: Run OpenTofu Plan
+        working-directory: bootstrap
+        run: mise exec -- terragrunt run --all plan -- -concise -no-color | tee "$RUNNER_TEMP/plan.txt"
+
+      # Only the plan itself (no init or hook output), shown open, with the summary line on top.
+      - name: Format OpenTofu Plan Comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          plan="$RUNNER_TEMP/plan.txt"
+          body=$(awk '/^(No changes\.|OpenTofu will perform|Note: Objects have changed|Changes to Outputs:|Planning failed)/{p=1} /^─+$|^(Added new|Updated) context|^❯❯ Run Summary|^[0-9:.]+ (INFO|WARN|ERROR)/{p=0} p' "$plan")
+          summary=$(grep -m1 -E '^(Plan: |No changes\.|Changes to Outputs:|Planning failed)' "$plan" || echo "The plan failed. See the job log.")
+          {
+            echo "### OpenTofu plan"
+            echo
+            echo "$summary"
+            if ! grep -q '^No changes\.' <<<"$summary"; then
+              echo
+              echo '```diff'
+              # GitHub colors + and - lines; ~ (update in place) becomes ! so it shows in orange.
+              echo "$body" | sed -E 's/^( +)([-+~])( )/\2\1\3/; s/^~/!/'
+              echo '```'
+            fi
+          } > "$RUNNER_TEMP/plan.md"
+
+      - name: Post OpenTofu Plan PR Comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # marocchino/sticky-pull-request-comment:v3.0.5
+        with:
+          header: opentofu-plan
+          recreate: true # delete the last run's comment, post this one at the bottom
+          path: ${{ runner.temp }}/plan.md
+
+      # What Helm would change in the cluster, as its own comment. The
+      # Terragrunt hook skips the diff in CI so it doesn't run twice. Helmfile reads its AWS
+      # values from OpenTofu state; the Gitea version comes from helmfile/env/sandbox.yaml.
+      - name: Run Helm Diff
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          out="$RUNNER_TEMP/helm-diff.md"
+          cluster=$(aws eks list-clusters --query "clusters[?starts_with(@, 'gitea-')] | [0]" --output text)
+          if [ "$cluster" = "None" ]; then
+            printf '### Helm diff\n\nNo cluster yet. The first deploy installs everything.\n' > "$out"
+            exit 0
+          fi
+          aws eks update-kubeconfig --name "$cluster" --alias gitea-sandbox
+          cd helmfile
+          diff=$(mise exec -- helmfile --quiet --no-color --environment sandbox --kube-context gitea-sandbox \
+            diff --context 5 --suppress-secrets --skip-diff-on-install 2>&1 | grep -v '^Comparing release=') || true
+          {
+            echo "### Helm diff"
+            echo
+            if [ -z "$diff" ]; then
+              echo "No changes to the Helm releases."
+            else
+              echo '```diff'
+              echo "$diff"
+              echo '```'
+            fi
+          } > "$out"
+
+      - name: Post Helm Diff PR Comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # marocchino/sticky-pull-request-comment:v3.0.5
+        with:
+          header: helm-diff
+          recreate: true # delete the last run's comment, post this one at the bottom
+          path: ${{ runner.temp }}/helm-diff.md
+
+  apply:
+    name: OpenTofu Apply + Helm Upgrade
+    if: >-
+      vars.BOOTSTRAPPED == 'true' && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_dispatch' && inputs.action == 'OpenTofu Apply')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: sandbox-apply
+    # One apply or destroy at a time, never cancelled half-way.
+    concurrency:
+      group: deploy-sandbox
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ACCOUNT: sandbox
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Pinned Tools (OpenTofu, Terragrunt, Helm, Helmfile, kubectl)
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
+        with:
+          install: true
+          cache: true
+
+      - name: Assume AWS Role github-apply via OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200 # EKS and RDS creation can take over an hour
+
+      - name: Run OpenTofu Apply, Then Helmfile Apply
+        uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
+        with:
+          tg_command: run --all apply --working-dir bootstrap
+          github_token: ${{ github.token }}
+
+      - name: Write Gitea URL to Job Summary
+        run: |
+          lb() { kubectl --context gitea-sandbox --namespace gitea get "$1" --output 'jsonpath={.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true; }
+          web=$(lb ingress/gitea)
+          ssh=$(lb service/gitea-ssh)
+          admin_secret=$(aws secretsmanager list-secrets --filters Key=name,Values=gitea- \
+            --query "reverse(sort_by(SecretList[?ends_with(Name, '/admin')], &CreatedDate))[0].Name" --output text)
+          {
+            echo "### Gitea on the Sandbox Account"
+            echo
+            echo "- Web: ${web:+http://$web/}"
+            echo "- SSH: ${ssh:+git@$ssh}"
+            echo "- Admin user: \`gitea_admin\` (password in AWS Secrets Manager, \`$admin_secret\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  destroy:
+    name: Helm Uninstall + OpenTofu Destroy
+    if: vars.BOOTSTRAPPED == 'true' && github.event_name == 'workflow_dispatch' && inputs.action == 'OpenTofu Destroy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: sandbox-apply
+    concurrency:
+      group: deploy-sandbox
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # actions/checkout:v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Pinned Tools (OpenTofu, Terragrunt, Helm, Helmfile, kubectl)
+        uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # jdx/mise-action:v5.2.1
+        with:
+          install: true
+          cache: true
+
+      - name: Assume AWS Role github-apply via OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials:v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      # The stack's hooks uninstall the Helm releases (waiting for the load balancers to go) before
+      # OpenTofu destroys the stack. state/ is never destroyed.
+      - name: Uninstall Helm Releases, Then Run OpenTofu Destroy
+        uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
+        with:
+          tg_command: run --all destroy --working-dir bootstrap
+          github_token: ${{ github.token }}

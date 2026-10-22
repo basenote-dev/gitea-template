@@ -1,0 +1,19 @@
+# Pinned tools: `mise install` gives everyone the versions CI uses.
+# mise doesn't install these, so install them yourself: the AWS CLI (Terragrunt hooks and
+# Helmfile call it), git, and gh (only for Method 2, the CI bootstrap).
+[tools]
+opentofu = "1.13.1"
+terragrunt = "1.1.6"
+helm = "4.3.1"
+# The Helm plugin `helmfile diff`/`apply` need. Helm runs it as diff/bin/diff; the mise registry
+# entry renames the binary to helm-diff, so keep its real name. Helm finds it through
+# HELM_PLUGINS below; bin_path keeps it off PATH so it doesn't shadow the system `diff`.
+helm-diff = { version = "3.15.15", rename_exe = "diff", bin_path = "not-on-path" }
+helmfile = "1.8.2"
+kustomize = "5.8.3"   # helmfile's strategicMergePatches run through it
+kubectl = "1.37.1"    # required: the apply hook reads the load balancer hostnames with it
+
+[env]
+# Helm loads plugins from the helm-diff release mise installed above, so the plugin is pinned
+# like every other tool and nothing is written to ~/.local/share/helm.
+HELM_PLUGINS = { value = "{{ tools['helm-diff'].path }}", tools = true }

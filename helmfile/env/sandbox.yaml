@@ -1,0 +1,9 @@
+# Sandbox sizing: enough for a reliable live demo, nothing more.
+gitea:
+  # The Gitea version to run (docker.gitea.com/gitea:<version>-rootless). Upgrade one release at
+  # a time: the pods roll one by one, and the first new pod updates the database tables when it
+  # starts. Never go back down (Gitea can't run on tables a newer version changed); restore the
+  # database with RDS point-in-time recovery instead. It lives here, not in OpenTofu, so a PR's
+  # plan shows the change in the Helm diff.
+  version: "1.26.3"
+  replicas: 2            # two replicas = rolling updates with zero downtime

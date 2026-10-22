@@ -1,0 +1,160 @@
+data "aws_partition" "this" {
+  count = var.create ? 1 : 0
+}
+
+locals {
+  bucket_arn = coalesce(var.bucket_arn, "arn:${try(data.aws_partition.this[0].partition, "")}:s3:::${var.bucket}")
+
+  # Convert from "arn:aws:sqs:eu-west-1:835367859851:bold-starling-0" into "https://sqs.eu-west-1.amazonaws.com/835367859851/bold-starling-0" if queue_id was not specified
+  # queue_url used in aws_sqs_queue_policy is not the same as arn which is used in all other places
+  queue_ids = { for k, v in var.sqs_notifications : k => format("https://%s.%s.amazonaws.com/%s/%s", data.aws_arn.queue[k].service, data.aws_arn.queue[k].region, data.aws_arn.queue[k].account, data.aws_arn.queue[k].resource) if v.queue_id == null }
+}
+
+resource "aws_s3_bucket_notification" "this" {
+  count = var.create ? 1 : 0
+
+  bucket = var.bucket
+
+  region = var.region
+
+  eventbridge = var.eventbridge
+
+  dynamic "lambda_function" {
+    for_each = var.lambda_notifications
+
+    content {
+      id                  = coalesce(lambda_function.value.id, lambda_function.key)
+      lambda_function_arn = lambda_function.value.function_arn
+      events              = lambda_function.value.events
+      filter_prefix       = lambda_function.value.filter_prefix
+      filter_suffix       = lambda_function.value.filter_suffix
+    }
+  }
+
+  dynamic "queue" {
+    for_each = var.sqs_notifications
+
+    content {
+      id            = coalesce(queue.value.id, queue.key)
+      queue_arn     = queue.value.queue_arn
+      events        = queue.value.events
+      filter_prefix = queue.value.filter_prefix
+      filter_suffix = queue.value.filter_suffix
+    }
+  }
+
+  dynamic "topic" {
+    for_each = var.sns_notifications
+
+    content {
+      id            = coalesce(topic.value.id, topic.key)
+      topic_arn     = topic.value.topic_arn
+      events        = topic.value.events
+      filter_prefix = topic.value.filter_prefix
+      filter_suffix = topic.value.filter_suffix
+    }
+  }
+
+  depends_on = [
+    aws_lambda_permission.allow,
+    aws_sqs_queue_policy.allow,
+    aws_sns_topic_policy.allow,
+  ]
+}
+
+# Lambda
+resource "aws_lambda_permission" "allow" {
+  for_each = { for k, v in var.lambda_notifications : k => v if var.create_lambda_permission }
+
+  region = var.region
+
+  statement_id_prefix = "AllowLambdaS3BucketNotification-"
+  action              = "lambda:InvokeFunction"
+  function_name       = each.value.function_name
+  qualifier           = each.value.qualifier
+  principal           = "s3.amazonaws.com"
+  source_arn          = local.bucket_arn
+  source_account      = each.value.source_account
+}
+
+# SQS Queue
+data "aws_arn" "queue" {
+  for_each = var.sqs_notifications
+
+  arn = each.value.queue_arn
+}
+
+data "aws_iam_policy_document" "sqs" {
+  for_each = { for k, v in var.sqs_notifications : k => v if var.create_sqs_policy }
+
+  version = "2012-10-17"
+
+  statement {
+    sid = "AllowSQSS3BucketNotification"
+
+    effect = "Allow"
+
+    actions = [
+      "sqs:SendMessage",
+    ]
+
+    principals {
+      type        = "Service"
+      identifiers = ["s3.amazonaws.com"]
+    }
+
+    resources = [each.value.queue_arn]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = [local.bucket_arn]
+    }
+  }
+}
+
+resource "aws_sqs_queue_policy" "allow" {
+  for_each = { for k, v in var.sqs_notifications : k => v if var.create_sqs_policy }
+
+  region = var.region
+
+  queue_url = each.value.queue_id != null ? each.value.queue_id : try(local.queue_ids[each.key], null)
+  policy    = data.aws_iam_policy_document.sqs[each.key].json
+}
+
+# SNS Topic
+data "aws_iam_policy_document" "sns" {
+  for_each = { for k, v in var.sns_notifications : k => v if var.create_sns_policy }
+
+  statement {
+    sid = "AllowSNSS3BucketNotification"
+
+    effect = "Allow"
+
+    actions = [
+      "sns:Publish",
+    ]
+
+    principals {
+      type        = "Service"
+      identifiers = ["s3.amazonaws.com"]
+    }
+
+    resources = [each.value.topic_arn]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = [local.bucket_arn]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "allow" {
+  for_each = { for k, v in var.sns_notifications : k => v if var.create_sns_policy }
+
+  region = var.region
+
+  arn    = each.value.topic_arn
+  policy = data.aws_iam_policy_document.sns[each.key].json
+}
