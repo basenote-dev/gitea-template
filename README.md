@@ -378,13 +378,14 @@ has a known production fix.
 
 ## Run the demo
 
-Every step of method 2 in two blocks you can paste as they are. Set your AWS profile and GitHub
-username in the first lines.
+Every step of method 2, filled in for the live demo (AWS profile `cologne-catalog-production`,
+GitHub user `basenote-dev`), in blocks you can paste as they are. For your own account, use the
+steps above.
 
 Log in:
 
 ```sh
-export AWS_PROFILE=<your-aws-profile>
+export AWS_PROFILE=cologne-catalog-production
 aws sso login
 gh auth login
 ```
@@ -393,7 +394,7 @@ Create your repo, bootstrap it, and start the first deploy:
 
 ```sh
 cd ~/Desktop
-export GH_USERNAME=<your-github-username>
+export GH_USERNAME=basenote-dev
 gh repo create $GH_USERNAME/gitea-deployment --template basenote-dev/gitea-template --private --clone
 cd gitea-deployment
 mise trust
@@ -408,6 +409,7 @@ gh run watch -R $GH_USERNAME/gitea-deployment
 Tear it down:
 
 ```sh
+export GH_USERNAME=basenote-dev
 gh workflow run deploy.yml -R $GH_USERNAME/gitea-deployment -f action="OpenTofu Destroy"
 sleep 10
 gh run watch -R $GH_USERNAME/gitea-deployment
