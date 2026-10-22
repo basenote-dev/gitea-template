@@ -136,11 +136,12 @@ terraform {
   }
 
   # What Helm would change, shown in the plan output (and the PR comment in CI).
+  # Laptop only: in CI a separate workflow step runs the diff and posts it as its own PR comment.
   after_hook "helmfile_diff" {
     commands    = ["plan"]
     execute     = concat(local.helmfile, ["diff", "--context", "5", "--suppress-secrets", "--skip-diff-on-install"])
     working_dir = local.helmfile_dir
-    if = anytrue([
+    if = get_env("GITHUB_ACTIONS", "") != "true" && anytrue([
       for cmd in local.check_cluster ? ["check"] : [] :
       trimspace(run_cmd("--terragrunt-quiet", "aws", "eks", "list-clusters",
         "--region", local.account.aws_region,

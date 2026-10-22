@@ -5,7 +5,8 @@
 # Terragrunt runs the gitea/ unit (OpenTofu in aws/, then Helmfile from its hooks). CI skips the
 # state/ unit; a person runs it once from a laptop.
 #
-#   pull request          -> plan (tofu plan + helmfile diff), posted as a PR comment
+#   pull request          -> plan, posted as two PR comments: the OpenTofu plan (collapsed) and
+#                            the Helm diff (open)
 #   merge to main         -> apply
 #   manual run (Actions)  -> plan, apply or destroy
 #
@@ -86,7 +87,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Run OpenTofu Plan and Helm Diff, Post PR Comment
+      - name: Run OpenTofu Plan, Post PR Comment
         uses: gruntwork-io/terragrunt-action@8c1d96b76d445fd2e41475a3f0b63dcd1d9cc077 # gruntwork-io/terragrunt-action:v3.4.1
         env:
           GITHUB_TOKEN: ${{ github.token }} # the action posts the comment with it
@@ -94,6 +95,41 @@ jobs:
           tg_command: run --all plan --working-dir bootstrap
           tg_comment: "1"
           github_token: ${{ github.token }}
+
+      # What Helm would change in the cluster, as its own comment that opens expanded. The
+      # Terragrunt hook skips the diff in CI so it doesn't run twice. Helmfile reads its AWS
+      # values from OpenTofu state; the Gitea version comes from helmfile/env/sandbox.yaml.
+      - name: Run Helm Diff
+        if: github.event_name == 'pull_request'
+        run: |
+          out="$RUNNER_TEMP/helm-diff.md"
+          cluster=$(aws eks list-clusters --query "clusters[?starts_with(@, 'gitea-')] | [0]" --output text)
+          if [ "$cluster" = "None" ]; then
+            printf '### Helm diff\n\nNo cluster yet. The first deploy installs everything.\n' > "$out"
+            exit 0
+          fi
+          aws eks update-kubeconfig --name "$cluster" --alias gitea-sandbox
+          cd helmfile
+          diff=$(mise exec -- helmfile --quiet --no-color --environment sandbox --kube-context gitea-sandbox \
+            diff --context 5 --suppress-secrets --skip-diff-on-install 2>&1) || true
+          {
+            echo "### Helm diff"
+            echo
+            if [ -z "$diff" ]; then
+              echo "No changes to the Helm releases."
+            else
+              echo '```diff'
+              echo "$diff"
+              echo '```'
+            fi
+          } > "$out"
+
+      - name: Post Helm Diff PR Comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # marocchino/sticky-pull-request-comment:v3.0.5
+        with:
+          header: helm-diff
+          path: ${{ runner.temp }}/helm-diff.md
 
   apply:
     name: OpenTofu Apply + Helm Upgrade

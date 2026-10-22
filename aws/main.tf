@@ -356,6 +356,10 @@ module "rds" {
   storage_type          = "gp3"
   storage_encrypted     = true
 
+  # AWS reports an empty list here even with no Directory Service domain. Unset, every plan
+  # showed the database as "changed outside of OpenTofu".
+  domain_dns_ips = []
+
   db_subnet_group_name   = module.vpc.database_subnet_group_name
   vpc_security_group_ids = [aws_security_group.data_store["postgres"].id]
   publicly_accessible    = false
