@@ -8,10 +8,19 @@ aws/         OpenTofu: VPC, EKS, RDS, Valkey, EFS
 helmfile/    everything inside the cluster (Gitea, External Secrets)
 bootstrap/   Terragrunt config that ties it together, plus the one-time state/ setup
 scripts/     the zero-downtime health check
-docs/images/ the diagrams in this README
+docs/        architecture decisions, reference, diagrams
 .mise.toml   pinned tool versions (mise install)
 modules/     vendored terraform-aws-modules
 ```
+
+## Documentation
+
+| Kind | Where | Read it to |
+| --- | --- | --- |
+| Tutorial | This README, from "Get your own copy" to "Method 2" | Deploy Gitea the first time |
+| How-to guides | This README: "Upgrade Gitea", "Tear down" | Upgrade without downtime, remove everything |
+| Reference | [Requirements](docs/reference/requirements.md), [What we built](docs/reference/what-we-built.md) | See what the assignment asked for and what exists |
+| Explanation | [Architecture decisions](docs/explanation/architecture-decisions.md) | Understand why it's built this way |
 
 ## Before you start
 
@@ -289,11 +298,8 @@ issues are in RDS. Sessions and cache are in Valkey. The SSH host key comes from
 To roll back, don't lower the version. Gitea can't run on tables a newer version changed.
 Restore the database with RDS point-in-time recovery instead.
 
-Why it's built this way: [adrs/0001-zero-downtime-gitea.md](adrs/0001-zero-downtime-gitea.md).
-Everything we built on top of the stock modules and charts:
-[adrs/0002-what-we-built.md](adrs/0002-what-we-built.md).
-What the bootstrap creates, and how pipelines and `kubectl` log in:
-[adrs/0003-bootstrap-and-access.md](adrs/0003-bootstrap-and-access.md).
+Why each rollout setting is there:
+[architecture decisions](docs/explanation/architecture-decisions.md#zero-downtime-rollout-settings).
 
 ## Tear down
 

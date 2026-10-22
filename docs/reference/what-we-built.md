@@ -1,12 +1,57 @@
-# ADR 0002: What we built on top of stock pieces
+# What we built
 
-Status: accepted, 2026-10-21
+What exists in this repo and in AWS, and where. Why each piece exists is in
+[architecture decisions](../explanation/architecture-decisions.md).
 
-Most of the repo is off the shelf: the modules in `modules/`, the official Gitea and External
-Secrets charts, EKS Auto Mode and stock GitHub Actions. This is everything we added, and why.
-The Gitea chart settings are in ADR 0001.
+## Layout
 
-## Bootstrap (`bootstrap/state/`)
+| Folder | What's in it |
+| --- | --- |
+| `aws/` | OpenTofu for everything in AWS: VPC, EKS, RDS, Valkey, EFS, IAM for the add-ons |
+| `helmfile/` | Everything inside the cluster: External Secrets, two small charts of ours, Gitea |
+| `bootstrap/` | Terragrunt: the one-time `state/` unit and the `gitea/` unit that runs `aws/` and Helmfile |
+| `modules/` | terraform-aws-modules, copied in at pinned versions |
+| `scripts/` | The zero-downtime health check |
+| `.github/workflows/` | Plan on pull requests, deploy on merge to `main` |
+
+## What the bootstrap creates
+
+Names start with `gitea-<suffix>`, a random suffix picked on the first apply. The bucket and the
+OIDC provider are the exceptions.
+
+| What | Name | Why |
+| --- | --- | --- |
+| S3 bucket | `gitea-tfstate-<account>-<region>` | OpenTofu state |
+| KMS key | `alias/gitea-<suffix>-tofu-state` | Encrypts state and plan files |
+| OIDC provider | `token.actions.githubusercontent.com` | Lets AWS trust GitHub's tokens |
+| IAM role | `gitea-<suffix>-github-plan` | Plans: read-only, plus the state lock, state key and secrets |
+| IAM role | `gitea-<suffix>-github-apply` | Deploys: admin |
+| IAM role | `gitea-<suffix>-platform-eks-admin` | People's way into the cluster |
+| Secrets | `gitea-<suffix>/db`, `/valkey`, `/admin`, `/metrics`, `/ssh-host-key`, `/app-ini-keys` | Random values, written write-only |
+| GitHub environments | `sandbox-plan`, `sandbox-apply` (`main` only) | Each holds `AWS_ROLE_ARN` for its role |
+| GitHub variable | `BOOTSTRAPPED=true` | Turns the workflow on |
+
+## Cluster access
+
+The cluster uses EKS access entries and has no `aws-auth` ConfigMap.
+
+| Role | Access | Used by |
+| --- | --- | --- |
+| `github-apply` | Cluster admin | Deploys |
+| `github-plan` | Read-only | `helmfile diff` in plans |
+| `platform-eks-admin` | Cluster admin | People |
+
+A person runs the `kubeconfig_command` the stack prints, which assumes `platform-eks-admin`.
+Anyone in the account whose IAM policy allows `sts:AssumeRole` on it can use it. Using one
+shared role keeps SSO role ARNs, which change when permission sets are rebuilt, out of the
+cluster. CloudTrail still records who assumed it.
+
+## Pieces we added to stock modules and charts
+
+Everything else is off the shelf: the modules in `modules/`, the official Gitea and External
+Secrets charts, EKS Auto Mode and stock GitHub Actions.
+
+### Bootstrap (`bootstrap/state/`)
 
 | What | Why |
 | --- | --- |
@@ -19,7 +64,7 @@ The Gitea chart settings are in ADR 0001.
 | Random secrets, written write-only | Passwords and keys never appear in Git, state or plan output |
 | Existing GitHub variables imported | GitHub rejects a create for a variable that already exists, which happens when a repo is bootstrapped twice |
 
-## Terragrunt (`bootstrap/`)
+### Terragrunt (`bootstrap/`)
 
 | What | Why |
 | --- | --- |
@@ -29,7 +74,7 @@ The Gitea chart settings are in ADR 0001.
 | Repo name read from the git remote | A copy of the template trusts its own repo without edits |
 | `EXPECTED_ACCOUNT_ID` | Optional guard against deploying to the wrong account |
 
-## AWS (`aws/main.tf`)
+### AWS (`aws/main.tf`)
 
 | What | Why |
 | --- | --- |
@@ -40,7 +85,7 @@ The Gitea chart settings are in ADR 0001.
 | `rds.force_ssl` with `apply_method = "pending-reboot"` | TLS-only database, without a change in every plan |
 | EFS access point at `/gitea`, uid/gid 1000 | Pods see only Gitea's folder, as the Gitea user |
 
-## Helmfile (`helmfile/`)
+### Helmfile (`helmfile/`)
 
 | What | Why |
 | --- | --- |
@@ -50,7 +95,7 @@ The Gitea chart settings are in ADR 0001.
 | Patch: `preStop: sleep 60` | The Gitea chart has no setting for it |
 | Patch: per-pod mount off the first init container | Fixes a mount race on a fresh install |
 
-## Pipeline and tooling
+### Pipeline and tooling
 
 | What | Why |
 | --- | --- |
