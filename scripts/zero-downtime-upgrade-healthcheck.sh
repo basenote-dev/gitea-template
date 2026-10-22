@@ -22,6 +22,9 @@
 # zero-downtime-healthcheck-<utc time>.log ("<utc time> <check> ok|fail").
 set -euo pipefail
 
+# Same default region as bootstrap/account.hcl, so it finds what Terragrunt deployed.
+export AWS_REGION=${AWS_REGION:-us-west-2}
+
 every=${EVERY:-3}
 duration=${DURATION:-0}
 admin=gitea_admin
