@@ -16,8 +16,8 @@ modules/     vendored terraform-aws-modules
 ## Before you start
 
 - Admin AWS credentials for an empty AWS account in your shell (`aws sts get-caller-identity`).
-- Everything deploys to us-west-2 unless you set `AWS_REGION`. Terragrunt and the health check
-  script both use that default, so set `AWS_REGION` the same way for both if you change it.
+- Every command below sets `AWS_REGION=us-west-2`. To use another region, change it the same
+  way in every command, including the health check and the teardown.
 - The AWS CLI, git and [mise](https://mise.jdx.dev) installed. For method 2 also `gh`.
 - mise only reads a repo's `.mise.toml` after you trust it. Until then it prints
   `mise WARN ... .mise.toml is not trusted` and installs nothing, so every method below runs
@@ -34,7 +34,7 @@ cd gitea-template
 mise trust
 mise install
 cd bootstrap
-terragrunt run --all apply --backend-bootstrap --non-interactive
+AWS_REGION=us-west-2 terragrunt run --all apply --backend-bootstrap --non-interactive
 ```
 
 `--non-interactive` skips Terragrunt's "run apply in each unit?" prompt. `run --all` already
@@ -50,7 +50,7 @@ cd <it>
 mise trust
 mise install
 cd bootstrap
-GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
+AWS_REGION=us-west-2 GITHUB_TOKEN=$(gh auth token) terragrunt apply --working-dir state --backend-bootstrap
 ```
 
 Then start the first deploy: Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Apply`.
@@ -113,7 +113,7 @@ An upgrade is a change to one line: `gitea_version` in the locals of
 ```sh
 sed -i '' 's/gitea_version = "1.26.3"/gitea_version = "1.26.4"/' aws/main.tf   # GNU sed: -i without ''
 cd bootstrap
-terragrunt run --all apply --non-interactive
+AWS_REGION=us-west-2 terragrunt run --all apply --non-interactive
 ```
 
 Only the Helm release changes, so the apply takes a few minutes.
@@ -122,7 +122,7 @@ Watch the upgrade: before you run the apply, start the health check in a second 
 the same AWS credentials and region:
 
 ```sh
-scripts/zero-downtime-upgrade-healthcheck.sh
+AWS_REGION=us-west-2 scripts/zero-downtime-upgrade-healthcheck.sh
 ```
 
 ### Method 2: with a pull request
@@ -143,7 +143,7 @@ Watch the upgrade: before you merge, start the health check in a second terminal
 same AWS credentials and region:
 
 ```sh
-scripts/zero-downtime-upgrade-healthcheck.sh
+AWS_REGION=us-west-2 scripts/zero-downtime-upgrade-healthcheck.sh
 ```
 
 Then merge. The merge to `main` runs the apply job, and the pods roll one at a time:
@@ -198,7 +198,7 @@ From your laptop (method 1), with the same AWS credentials and region as the dep
 
 ```sh
 cd bootstrap
-terragrunt run --all destroy --non-interactive
+AWS_REGION=us-west-2 terragrunt run --all destroy --non-interactive
 ```
 
 With GitHub Actions (method 2): Actions -> Gitea Deploy -> Run workflow -> `OpenTofu Destroy`.
@@ -210,8 +210,8 @@ destroy itself. To remove the bootstrap too, delete those resources by hand, the
 key for deletion (7 days is the shortest AWS allows):
 
 ```sh
-aws kms schedule-key-deletion --pending-window-in-days 7 \
-  --key-id "$(aws kms describe-key --key-id alias/gitea-<suffix>-tofu-state --query KeyMetadata.KeyId --output text)"
+aws kms schedule-key-deletion --region us-west-2 --pending-window-in-days 7 \
+  --key-id "$(aws kms describe-key --region us-west-2 --key-id alias/gitea-<suffix>-tofu-state --query KeyMetadata.KeyId --output text)"
 ```
 
 ## Demo limitations
